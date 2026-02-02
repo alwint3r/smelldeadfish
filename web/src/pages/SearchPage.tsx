@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { ServiceSelect } from "../components/filters/ServiceSelect";
 import { TimeRangePicker } from "../components/filters/TimeRangePicker";
 import { AttrFilters } from "../components/filters/AttrFilters";
@@ -9,16 +9,85 @@ import type { AttrFilter, TraceQuery } from "../types";
 
 const DEFAULT_LIMIT = 100;
 const LIMIT_STEP = 100;
+const DEFAULT_RANGE_MS = 60 * 60 * 1000;
+const MS_TO_NS = 1_000_000;
+
+type UrlSearchState = {
+  service: string;
+  startMs: number;
+  endMs: number;
+  limit: number;
+};
+
+function getDefaultRange(): { startMs: number; endMs: number } {
+  const now = Date.now();
+  return { startMs: now - DEFAULT_RANGE_MS, endMs: now };
+}
+
+function toNs(ms: number): number {
+  return Math.floor(ms * MS_TO_NS);
+}
+
+function toMs(ns: number): number {
+  return Math.floor(ns / MS_TO_NS);
+}
+
+function parseNumberParam(params: URLSearchParams, key: string): number | null {
+  const raw = params.get(key);
+  if (!raw) {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
+function parseSearchState(search: string): UrlSearchState {
+  const params = new URLSearchParams(search);
+  const defaults = getDefaultRange();
+  const service = (params.get("service") ?? "").trim();
+
+  let startMs = parseNumberParam(params, "startMs");
+  let endMs = parseNumberParam(params, "endMs");
+  let limit = parseNumberParam(params, "limit");
+
+  if (startMs === null) {
+    startMs = defaults.startMs;
+  }
+  if (endMs === null) {
+    endMs = defaults.endMs;
+  }
+  if (endMs < startMs) {
+    startMs = defaults.startMs;
+    endMs = defaults.endMs;
+  }
+  if (limit === null || limit <= 0) {
+    limit = DEFAULT_LIMIT;
+  }
+
+  return { service, startMs, endMs, limit };
+}
+
+function buildSearchParams(state: UrlSearchState): string {
+  const service = state.service.trim();
+  if (!service) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  params.set("service", service);
+  params.set("startMs", String(Math.trunc(state.startMs)));
+  params.set("endMs", String(Math.trunc(state.endMs)));
+  params.set("limit", String(Math.trunc(state.limit)));
+  return params.toString();
+}
 
 export function SearchPage() {
-  const now = Date.now();
   const [service, setService] = useState("");
   const [serviceError, setServiceError] = useState<string | undefined>(undefined);
   const [filters, setFilters] = useState<AttrFilter[]>([]);
-  const [range, setRange] = useState({
-    startMs: now - 60 * 60 * 1000,
-    endMs: now,
-  });
+  const [range, setRange] = useState(() => getDefaultRange());
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [query, setQuery] = useState<TraceQuery | null>(null);
 
@@ -29,8 +98,44 @@ export function SearchPage() {
 
   const traceState = useTraces(query);
 
+  const applyUrlState = (search: string) => {
+    const parsed = parseSearchState(search);
+    setService(parsed.service);
+    setRange({ startMs: parsed.startMs, endMs: parsed.endMs });
+    setLimit(parsed.limit);
+    setFilters([]);
+    setServiceError(undefined);
+
+    if (!parsed.service) {
+      setQuery(null);
+      return;
+    }
+
+    setQuery({
+      service: parsed.service,
+      start: toNs(parsed.startMs),
+      end: toNs(parsed.endMs),
+      limit: parsed.limit,
+      attrFilters: [],
+    });
+  };
+
+  useEffect(() => {
+    applyUrlState(window.location.search);
+
+    const handlePopState = () => {
+      applyUrlState(window.location.search);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
   const handleSearch = () => {
-    if (!service.trim()) {
+    const trimmedService = service.trim();
+    if (!trimmedService) {
       setServiceError("Service is required.");
       return;
     }
@@ -41,15 +146,24 @@ export function SearchPage() {
     }
     const nextLimit = DEFAULT_LIMIT;
     setLimit(nextLimit);
-    const startNs = Math.floor(range.startMs * 1_000_000);
-    const endNs = Math.floor(range.endMs * 1_000_000);
+    const startNs = toNs(range.startMs);
+    const endNs = toNs(range.endMs);
     setQuery({
-      service: service.trim(),
+      service: trimmedService,
       start: startNs,
       end: endNs,
       limit: nextLimit,
       attrFilters: sanitizedFilters,
     });
+
+    const searchParams = buildSearchParams({
+      service: trimmedService,
+      startMs: range.startMs,
+      endMs: range.endMs,
+      limit: nextLimit,
+    });
+    const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
+    window.history.pushState(null, "", nextUrl);
   };
 
   const handleLoadMore = () => {
@@ -59,6 +173,15 @@ export function SearchPage() {
     const nextLimit = limit + LIMIT_STEP;
     setLimit(nextLimit);
     setQuery({ ...query, limit: nextLimit });
+
+    const searchParams = buildSearchParams({
+      service: query.service,
+      startMs: toMs(query.start),
+      endMs: toMs(query.end),
+      limit: nextLimit,
+    });
+    const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
+    window.history.pushState(null, "", nextUrl);
   };
 
   return (
