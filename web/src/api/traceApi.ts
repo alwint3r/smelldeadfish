@@ -12,6 +12,7 @@ function buildTraceQueryParams(query: TraceQuery): string {
   params.set("start", String(query.start));
   params.set("end", String(query.end));
   params.set("limit", String(query.limit));
+  params.set("order", query.order);
   for (const filter of query.attrFilters) {
     if (filter.key.trim() && filter.value.trim()) {
       params.append("attr", `${filter.key}=${filter.value}`);

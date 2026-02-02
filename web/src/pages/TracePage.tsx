@@ -4,11 +4,13 @@ import { TraceDetail } from "../components/trace/TraceDetail";
 
 export function TracePage(props: RouteComponentProps<{ traceId: string }>) {
   const traceId = props.traceId;
+  const search = window.location.search;
+  const backHref = search ? `/${search}` : "/";
 
   return (
     <div class="trace-page">
       <div class="trace-page-header">
-        <Link class="ghost-button" href="/">
+        <Link class="ghost-button" href={backHref}>
           Back to search
         </Link>
         <div class="muted">Trace details</div>

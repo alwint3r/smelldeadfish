@@ -5,18 +5,27 @@ import { AttrFilters } from "../components/filters/AttrFilters";
 import { TraceList } from "../components/trace/TraceList";
 import { TraceSummaryBar } from "../components/trace/TraceSummaryBar";
 import { useTraces } from "../hooks/useTraces";
-import type { AttrFilter, TraceQuery } from "../types";
+import type { AttrFilter, TraceOrder, TraceQuery } from "../types";
 
 const DEFAULT_LIMIT = 100;
 const LIMIT_STEP = 100;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const MS_TO_NS = 1_000_000;
+const DEFAULT_ORDER: TraceOrder = "start_desc";
+
+const ORDER_OPTIONS: Array<{ value: TraceOrder; label: string }> = [
+  { value: "start_desc", label: "Newest first" },
+  { value: "start_asc", label: "Oldest first" },
+  { value: "duration_desc", label: "Duration: longest first" },
+  { value: "duration_asc", label: "Duration: shortest first" },
+];
 
 type UrlSearchState = {
   service: string;
   startMs: number;
   endMs: number;
   limit: number;
+  order: TraceOrder;
 };
 
 function getDefaultRange(): { startMs: number; endMs: number } {
@@ -44,6 +53,19 @@ function parseNumberParam(params: URLSearchParams, key: string): number | null {
   return Math.trunc(value);
 }
 
+function parseOrderParam(params: URLSearchParams): TraceOrder {
+  const raw = (params.get("order") ?? "").trim();
+  switch (raw) {
+    case "start_desc":
+    case "start_asc":
+    case "duration_desc":
+    case "duration_asc":
+      return raw;
+    default:
+      return DEFAULT_ORDER;
+  }
+}
+
 function parseSearchState(search: string): UrlSearchState {
   const params = new URLSearchParams(search);
   const defaults = getDefaultRange();
@@ -52,6 +74,7 @@ function parseSearchState(search: string): UrlSearchState {
   let startMs = parseNumberParam(params, "startMs");
   let endMs = parseNumberParam(params, "endMs");
   let limit = parseNumberParam(params, "limit");
+  const order = parseOrderParam(params);
 
   if (startMs === null) {
     startMs = defaults.startMs;
@@ -67,7 +90,7 @@ function parseSearchState(search: string): UrlSearchState {
     limit = DEFAULT_LIMIT;
   }
 
-  return { service, startMs, endMs, limit };
+  return { service, startMs, endMs, limit, order };
 }
 
 function buildSearchParams(state: UrlSearchState): string {
@@ -80,6 +103,7 @@ function buildSearchParams(state: UrlSearchState): string {
   params.set("startMs", String(Math.trunc(state.startMs)));
   params.set("endMs", String(Math.trunc(state.endMs)));
   params.set("limit", String(Math.trunc(state.limit)));
+  params.set("order", state.order);
   return params.toString();
 }
 
@@ -89,6 +113,7 @@ export function SearchPage() {
   const [filters, setFilters] = useState<AttrFilter[]>([]);
   const [range, setRange] = useState(() => getDefaultRange());
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [order, setOrder] = useState<TraceOrder>(DEFAULT_ORDER);
   const [query, setQuery] = useState<TraceQuery | null>(null);
 
   const sanitizedFilters = useMemo(
@@ -97,12 +122,14 @@ export function SearchPage() {
   );
 
   const traceState = useTraces(query);
+  const searchSuffix = window.location.search;
 
   const applyUrlState = (search: string) => {
     const parsed = parseSearchState(search);
     setService(parsed.service);
     setRange({ startMs: parsed.startMs, endMs: parsed.endMs });
     setLimit(parsed.limit);
+    setOrder(parsed.order);
     setFilters([]);
     setServiceError(undefined);
 
@@ -116,6 +143,7 @@ export function SearchPage() {
       start: toNs(parsed.startMs),
       end: toNs(parsed.endMs),
       limit: parsed.limit,
+      order: parsed.order,
       attrFilters: [],
     });
   };
@@ -153,6 +181,7 @@ export function SearchPage() {
       start: startNs,
       end: endNs,
       limit: nextLimit,
+      order,
       attrFilters: sanitizedFilters,
     });
 
@@ -161,6 +190,7 @@ export function SearchPage() {
       startMs: range.startMs,
       endMs: range.endMs,
       limit: nextLimit,
+      order,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
     window.history.pushState(null, "", nextUrl);
@@ -179,6 +209,7 @@ export function SearchPage() {
       startMs: toMs(query.start),
       endMs: toMs(query.end),
       limit: nextLimit,
+      order: query.order,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
     window.history.pushState(null, "", nextUrl);
@@ -189,6 +220,24 @@ export function SearchPage() {
       <aside class="filters-panel">
         <div class="panel-title">Search</div>
         <ServiceSelect value={service} onChange={setService} error={serviceError} />
+        <div class="field">
+          <label class="field-label" for="order-input">
+            Order
+          </label>
+          <select
+            id="order-input"
+            class="field-input"
+            value={order}
+            onChange={(event) => setOrder((event.target as HTMLSelectElement).value as TraceOrder)}
+          >
+            {ORDER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div class="field-hint">Sort traces by start time or duration.</div>
+        </div>
         <TimeRangePicker startMs={range.startMs} endMs={range.endMs} onChange={setRange} />
         <AttrFilters filters={filters} onChange={setFilters} />
         <button class="primary-button" type="button" onClick={handleSearch}>
@@ -219,6 +268,7 @@ export function SearchPage() {
           canLoadMore={
             traceState.status === "success" && !!query && traceState.data.length >= query.limit
           }
+          searchSuffix={searchSuffix}
         />
       </section>
     </div>

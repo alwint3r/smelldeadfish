@@ -51,10 +51,10 @@ curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=999
 
 ## Query trace summaries
 
-Trace summaries are only available when using the SQLite sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
+Trace summaries are only available when using the SQLite sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Use the `order` parameter to sort (`start_desc`, `start_asc`, `duration_desc`, `duration_asc`); results default to newest first and a limit of 100.
 
 ```
-curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5"
+curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&order=duration_desc"
 ```
 
 ## Query a trace detail

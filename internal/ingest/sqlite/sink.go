@@ -13,10 +13,10 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"smelldeadfish/internal/ingest"
-	"smelldeadfish/internal/spanstore"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
+	"smelldeadfish/internal/ingest"
+	"smelldeadfish/internal/spanstore"
 )
 
 const (
@@ -168,6 +168,9 @@ func (s *Sink) QueryTraces(ctx context.Context, params spanstore.TraceQueryParam
 	if params.Limit <= 0 {
 		params.Limit = 100
 	}
+	if params.Order == "" {
+		params.Order = spanstore.TraceOrderStartDesc
+	}
 	query, args := buildTraceSummaryQuery(params)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -310,12 +313,27 @@ SELECT s.trace_id,
 FROM spans s
 JOIN candidate_traces ct ON ct.trace_id = s.trace_id
 GROUP BY s.trace_id
-ORDER BY start_time_unix_nano DESC
-LIMIT ?`)
+`)
+
+	builder.WriteString(traceSummaryOrderClause(params.Order))
+	builder.WriteString(` LIMIT ?`)
 
 	args = append(args, rootSpanParentID, params.Service, params.Limit)
 
 	return builder.String(), args
+}
+
+func traceSummaryOrderClause(order spanstore.TraceOrder) string {
+	switch order {
+	case spanstore.TraceOrderStartAsc:
+		return ` ORDER BY start_time_unix_nano ASC, trace_id DESC`
+	case spanstore.TraceOrderDurationDesc:
+		return ` ORDER BY duration_unix_nano DESC, start_time_unix_nano DESC, trace_id DESC`
+	case spanstore.TraceOrderDurationAsc:
+		return ` ORDER BY duration_unix_nano ASC, start_time_unix_nano DESC, trace_id DESC`
+	default:
+		return ` ORDER BY start_time_unix_nano DESC, trace_id DESC`
+	}
 }
 
 func buildTraceSpansQuery(traceID string, service string) (string, []interface{}) {

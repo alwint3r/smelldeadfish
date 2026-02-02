@@ -4,11 +4,14 @@ export type AttrFilter = {
   value: string;
 };
 
+export type TraceOrder = "start_desc" | "start_asc" | "duration_desc" | "duration_asc";
+
 export type TraceQuery = {
   service: string;
   start: number;
   end: number;
   limit: number;
+  order: TraceOrder;
   attrFilters: AttrFilter[];
 };
 

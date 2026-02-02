@@ -7,6 +7,15 @@ type AttrFilter struct {
 	Value string
 }
 
+type TraceOrder string
+
+const (
+	TraceOrderStartDesc    TraceOrder = "start_desc"
+	TraceOrderStartAsc     TraceOrder = "start_asc"
+	TraceOrderDurationDesc TraceOrder = "duration_desc"
+	TraceOrderDurationAsc  TraceOrder = "duration_asc"
+)
+
 type QueryParams struct {
 	Service     string
 	Start       int64
@@ -20,6 +29,7 @@ type TraceQueryParams struct {
 	Start       int64
 	End         int64
 	Limit       int
+	Order       TraceOrder
 	AttrFilters []AttrFilter
 }
 

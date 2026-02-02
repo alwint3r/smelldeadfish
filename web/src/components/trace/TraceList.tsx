@@ -7,12 +7,14 @@ export function TraceList({
   error,
   onLoadMore,
   canLoadMore,
+  searchSuffix,
 }: {
   traces: TraceSummary[];
   status: "idle" | "loading" | "success" | "error";
   error?: string;
   onLoadMore: () => void;
   canLoadMore: boolean;
+  searchSuffix: string;
 }) {
   if (status === "idle") {
     return <div class="empty-state">Run a search to see traces.</div>;
@@ -33,7 +35,7 @@ export function TraceList({
   return (
     <div class="trace-list">
       {traces.map((trace) => (
-        <TraceRow key={trace.trace_id} trace={trace} />
+        <TraceRow key={trace.trace_id} trace={trace} searchSuffix={searchSuffix} />
       ))}
       {status === "loading" ? (
         <div class="loading-state">Loading more traces...</div>

@@ -127,11 +127,32 @@ func parseTraceQueryParams(r *http.Request) (spanstore.TraceQueryParams, error) 
 	if err != nil {
 		return spanstore.TraceQueryParams{}, err
 	}
+	order := spanstore.TraceOrderStartDesc
+	if rawOrder := strings.TrimSpace(values.Get("order")); rawOrder != "" {
+		parsed, err := parseTraceOrder(rawOrder)
+		if err != nil {
+			return spanstore.TraceQueryParams{}, err
+		}
+		order = parsed
+	}
 	return spanstore.TraceQueryParams{
 		Service:     service,
 		Start:       start,
 		End:         end,
 		Limit:       limit,
+		Order:       order,
 		AttrFilters: filters,
 	}, nil
+}
+
+func parseTraceOrder(raw string) (spanstore.TraceOrder, error) {
+	switch spanstore.TraceOrder(raw) {
+	case spanstore.TraceOrderStartDesc,
+		spanstore.TraceOrderStartAsc,
+		spanstore.TraceOrderDurationDesc,
+		spanstore.TraceOrderDurationAsc:
+		return spanstore.TraceOrder(raw), nil
+	default:
+		return "", fmt.Errorf("order must be start_desc, start_asc, duration_desc, or duration_asc")
+	}
 }

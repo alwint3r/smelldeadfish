@@ -2,11 +2,14 @@ import { Link } from "preact-router/match";
 import type { TraceSummary } from "../../types";
 import { formatDuration, formatTimestamp, formatCount } from "../../utils/format";
 
-export function TraceRow({ trace }: { trace: TraceSummary }) {
+export function TraceRow({ trace, searchSuffix }: { trace: TraceSummary; searchSuffix: string }) {
   const hasErrors = trace.error_count > 0;
 
   return (
-    <Link class={`trace-row ${hasErrors ? "trace-row--error" : ""}`} href={`/trace/${trace.trace_id}`}>
+    <Link
+      class={`trace-row ${hasErrors ? "trace-row--error" : ""}`}
+      href={`/trace/${trace.trace_id}${searchSuffix}`}
+    >
       <div class="trace-main">
         <div class="trace-name">{trace.root_name || "(unknown root)"}</div>
         <div class="trace-meta">
