@@ -222,3 +222,5 @@ temp/
 # Ignore everything in .agent except PLANS.md
 .agent/*
 !.agent/PLANS.md
+
+*.sqlite*

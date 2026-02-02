@@ -4,3 +4,4 @@ When writing complex features or significant refactors, use an ExecPlan (as desc
 
 To persist your ExecPlan, you can use the .agent directory (alongside the file PLANS.md).
 Do not alter the .agent/PLANS.md file.
+Use a unique name for each of your ExecPlan.

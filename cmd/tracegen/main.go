@@ -65,6 +65,25 @@ func sampleRequest() *coltracepb.ExportTraceServiceRequest {
 									{Key: "http.method", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "GET"}}},
 									{Key: "http.route", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "/demo"}}},
 								},
+								Events: []*tracepb.Span_Event{
+									{
+										Name:         "demo.event",
+										TimeUnixNano: end,
+										Attributes: []*commonpb.KeyValue{
+											{Key: "event.attr", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "value"}}},
+										},
+									},
+								},
+								Links: []*tracepb.Span_Link{
+									{
+										TraceId:    []byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f},
+										SpanId:     []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11},
+										TraceState: "demo=1",
+										Attributes: []*commonpb.KeyValue{
+											{Key: "link.attr", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "link"}}},
+										},
+									},
+								},
 							},
 						},
 					},

@@ -26,19 +26,19 @@ func (s *StdoutSink) Consume(ctx context.Context, req *coltracepb.ExportTraceSer
 		return nil
 	}
 	for _, resourceSpans := range req.GetResourceSpans() {
-		serviceName := resourceServiceName(resourceSpans.GetResource())
+		serviceName := ResourceServiceName(resourceSpans.GetResource())
 		for _, scopeSpans := range resourceSpans.GetScopeSpans() {
 			for _, span := range scopeSpans.GetSpans() {
 				fmt.Fprintf(
 					s.out,
 					"span service=%s trace_id=%s span_id=%s parent_id=%s name=%s kind=%s duration=%s attrs=%d\n",
 					serviceName,
-					formatTraceID(span.GetTraceId()),
-					formatSpanID(span.GetSpanId()),
-					formatSpanID(span.GetParentSpanId()),
+					FormatTraceID(span.GetTraceId()),
+					FormatSpanID(span.GetSpanId()),
+					FormatSpanID(span.GetParentSpanId()),
 					span.GetName(),
-					spanKind(span.GetKind()),
-					spanDuration(span),
+					SpanKind(span.GetKind()),
+					SpanDuration(span),
 					len(span.GetAttributes()),
 				)
 			}
@@ -47,16 +47,16 @@ func (s *StdoutSink) Consume(ctx context.Context, req *coltracepb.ExportTraceSer
 	return nil
 }
 
-func resourceServiceName(resource *resourcepb.Resource) string {
+func ResourceServiceName(resource *resourcepb.Resource) string {
 	for _, attr := range resource.GetAttributes() {
 		if attr.GetKey() == "service.name" {
-			return valueString(attr.GetValue())
+			return ValueString(attr.GetValue())
 		}
 	}
 	return "unknown"
 }
 
-func valueString(value *commonpb.AnyValue) string {
+func ValueString(value *commonpb.AnyValue) string {
 	if value == nil {
 		return ""
 	}
@@ -74,28 +74,28 @@ func valueString(value *commonpb.AnyValue) string {
 	}
 }
 
-func formatTraceID(traceID []byte) string {
+func FormatTraceID(traceID []byte) string {
 	if len(traceID) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("%x", traceID)
 }
 
-func formatSpanID(spanID []byte) string {
+func FormatSpanID(spanID []byte) string {
 	if len(spanID) == 0 {
 		return "0000000000000000"
 	}
 	return fmt.Sprintf("%x", spanID)
 }
 
-func spanKind(kind tracepb.Span_SpanKind) string {
+func SpanKind(kind tracepb.Span_SpanKind) string {
 	if kind == tracepb.Span_SPAN_KIND_UNSPECIFIED {
 		return "UNSPECIFIED"
 	}
 	return kind.String()
 }
 
-func spanDuration(span *tracepb.Span) string {
+func SpanDuration(span *tracepb.Span) string {
 	if span == nil {
 		return "0s"
 	}

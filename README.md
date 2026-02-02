@@ -1,8 +1,11 @@
 # Deadfish OTLP HTTP Receiver
 
-This project provides a minimal Go service that receives OpenTelemetry Protocol (OTLP) traces over HTTP and prints concise span summaries to stdout. It is a starting point for building a custom trace storage and query system in the future.
+This project provides a minimal Go service that receives OpenTelemetry Protocol (OTLP) traces over HTTP. There are two executables:
 
-## Run the receiver
+- `cmd/otlp-stdout` for stdout-only span summaries
+- `cmd/otlp-server` for configurable sinks (stdout or SQLite) with optional query endpoint
+
+## Run the stdout receiver
 
 From the repository root:
 
@@ -14,6 +17,14 @@ The server listens on `:4318` by default. You can override the address:
 
 ```
 go run ./cmd/otlp-stdout -addr :14318
+```
+
+## Run the configurable server
+
+The configurable server supports `-sink stdout` or `-sink sqlite` and an optional SQLite database path:
+
+```
+go run ./cmd/otlp-server -sink sqlite -db ./deadfish.sqlite
 ```
 
 ## Send a sample trace
@@ -28,6 +39,14 @@ You should see a line like the following in the receiver output:
 
 ```
 span service=deadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7 parent_id=0000000000000000 name=GET /demo kind=SERVER duration=50ms attrs=2
+```
+
+## Query stored spans
+
+The query endpoint is only available when using the SQLite sink (`-sink sqlite`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
+
+```
+curl "http://localhost:4318/api/spans?service=deadfish-demo&start=0&end=9999999999999999999&limit=5&attr=http.method=GET"
 ```
 
 ## Tests
