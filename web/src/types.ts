@@ -1,4 +1,5 @@
 export type AttrFilter = {
+  id: string;
   key: string;
   value: string;
 };

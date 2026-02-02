@@ -1,5 +1,12 @@
 import type { AttrFilter } from "../../types";
 
+let attrFilterIdCounter = 0;
+
+function createAttrFilter(): AttrFilter {
+  attrFilterIdCounter += 1;
+  return { id: `attr-filter-${attrFilterIdCounter}`, key: "", value: "" };
+}
+
 export function AttrFilters({
   filters,
   onChange,
@@ -15,7 +22,7 @@ export function AttrFilters({
   };
 
   const addFilter = () => {
-    onChange([...filters, { key: "", value: "" }]);
+    onChange([...filters, createAttrFilter()]);
   };
 
   const removeFilter = (index: number) => {
@@ -30,7 +37,7 @@ export function AttrFilters({
       ) : null}
       <div class="attr-list">
         {filters.map((filter, index) => (
-          <div class="attr-row" key={`${filter.key}-${index}`}>
+          <div class="attr-row" key={filter.id}>
             <input
               class="field-input"
               type="text"
