@@ -15,6 +15,25 @@ type QueryParams struct {
 	AttrFilters []AttrFilter
 }
 
+type TraceQueryParams struct {
+	Service     string
+	Start       int64
+	End         int64
+	Limit       int
+	AttrFilters []AttrFilter
+}
+
+type TraceSummary struct {
+	TraceID           string `json:"trace_id"`
+	RootName          string `json:"root_name"`
+	StartTimeUnixNano int64  `json:"start_time_unix_nano"`
+	EndTimeUnixNano   int64  `json:"end_time_unix_nano"`
+	DurationUnixNano  int64  `json:"duration_unix_nano"`
+	SpanCount         int64  `json:"span_count"`
+	ErrorCount        int64  `json:"error_count"`
+	ServiceName       string `json:"service_name"`
+}
+
 type Span struct {
 	TraceID           string                 `json:"trace_id"`
 	SpanID            string                 `json:"span_id"`
@@ -64,4 +83,6 @@ type Link struct {
 
 type Store interface {
 	QuerySpans(ctx context.Context, params QueryParams) ([]Span, error)
+	QueryTraces(ctx context.Context, params TraceQueryParams) ([]TraceSummary, error)
+	QueryTraceSpans(ctx context.Context, traceID string, service string) ([]Span, error)
 }

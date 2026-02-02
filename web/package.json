@@ -1,0 +1,21 @@
+{
+  "name": "deadfish-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.19.6",
+    "preact-router": "^4.1.1"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.1",
+    "@types/node": "^20.12.12",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.2"
+  }
+}

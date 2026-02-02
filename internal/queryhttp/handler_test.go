@@ -23,6 +23,14 @@ func (f *fakeStore) QuerySpans(_ context.Context, params spanstore.QueryParams) 
 	return f.spans, nil
 }
 
+func (f *fakeStore) QueryTraces(_ context.Context, _ spanstore.TraceQueryParams) ([]spanstore.TraceSummary, error) {
+	return []spanstore.TraceSummary{}, nil
+}
+
+func (f *fakeStore) QueryTraceSpans(_ context.Context, _ string, _ string) ([]spanstore.Span, error) {
+	return []spanstore.Span{}, nil
+}
+
 func TestHandlerRequiresParams(t *testing.T) {
 	h := NewHandler(&fakeStore{})
 	req := httptest.NewRequest(http.MethodGet, spansPath, nil)

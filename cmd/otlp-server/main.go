@@ -20,7 +20,9 @@ func main() {
 	flag.Parse()
 
 	var sink ingest.TraceSink
-	var queryHandler http.Handler
+	var spanQueryHandler http.Handler
+	var tracesQueryHandler http.Handler
+	var traceDetailHandler http.Handler
 	switch strings.ToLower(strings.TrimSpace(*sinkKind)) {
 	case "stdout":
 		sink = ingest.NewStdoutSink(os.Stdout)
@@ -38,7 +40,9 @@ func main() {
 			}
 		}()
 		sink = sqliteSink
-		queryHandler = queryhttp.NewHandler(sqliteSink)
+		spanQueryHandler = queryhttp.NewHandler(sqliteSink)
+		tracesQueryHandler = queryhttp.NewTracesHandler(sqliteSink)
+		traceDetailHandler = queryhttp.NewTraceDetailHandler(sqliteSink)
 	default:
 		log.Fatalf("unknown sink: %s", *sinkKind)
 	}
@@ -46,8 +50,10 @@ func main() {
 	otlpHandler := otlphttp.NewHandler(sink, otlphttp.Options{})
 	mux := http.NewServeMux()
 	mux.Handle("/v1/traces", otlpHandler)
-	if queryHandler != nil {
-		mux.Handle("/api/spans", queryHandler)
+	if spanQueryHandler != nil {
+		mux.Handle("/api/spans", spanQueryHandler)
+		mux.Handle("/api/traces", tracesQueryHandler)
+		mux.Handle("/api/traces/", traceDetailHandler)
 	}
 
 	server := &http.Server{Addr: *addr, Handler: mux}

@@ -20,13 +20,14 @@ import (
 )
 
 const (
-	attrTypeString = "string"
-	attrTypeInt    = "int"
-	attrTypeDouble = "double"
-	attrTypeBool   = "bool"
-	attrTypeBytes  = "bytes"
-	attrTypeArray  = "array"
-	attrTypeKVList = "kvlist"
+	attrTypeString   = "string"
+	attrTypeInt      = "int"
+	attrTypeDouble   = "double"
+	attrTypeBool     = "bool"
+	attrTypeBytes    = "bytes"
+	attrTypeArray    = "array"
+	attrTypeKVList   = "kvlist"
+	rootSpanParentID = "0000000000000000"
 )
 
 type Sink struct {
@@ -163,6 +164,109 @@ func (s *Sink) QuerySpans(ctx context.Context, params spanstore.QueryParams) ([]
 	return spans, nil
 }
 
+func (s *Sink) QueryTraces(ctx context.Context, params spanstore.TraceQueryParams) ([]spanstore.TraceSummary, error) {
+	if params.Limit <= 0 {
+		params.Limit = 100
+	}
+	query, args := buildTraceSummaryQuery(params)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query traces: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []spanstore.TraceSummary
+	for rows.Next() {
+		var rootName sql.NullString
+		summary := spanstore.TraceSummary{}
+		if err := rows.Scan(
+			&summary.TraceID,
+			&rootName,
+			&summary.StartTimeUnixNano,
+			&summary.EndTimeUnixNano,
+			&summary.DurationUnixNano,
+			&summary.SpanCount,
+			&summary.ErrorCount,
+			&summary.ServiceName,
+		); err != nil {
+			return nil, fmt.Errorf("scan traces: %w", err)
+		}
+		if rootName.Valid {
+			summary.RootName = rootName.String
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate traces: %w", err)
+	}
+	return summaries, nil
+}
+
+func (s *Sink) QueryTraceSpans(ctx context.Context, traceID string, service string) ([]spanstore.Span, error) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil, fmt.Errorf("trace_id is required")
+	}
+	query, args := buildTraceSpansQuery(traceID, service)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query trace spans: %w", err)
+	}
+	defer rows.Close()
+
+	var spans []spanstore.Span
+	for rows.Next() {
+		var spanRowID string
+		var resourceID string
+		var scopeID string
+		span := spanstore.Span{}
+		if err := rows.Scan(
+			&spanRowID,
+			&span.TraceID,
+			&span.SpanID,
+			&span.ParentSpanID,
+			&span.Name,
+			&span.Kind,
+			&span.StartTimeUnixNano,
+			&span.EndTimeUnixNano,
+			&span.StatusCode,
+			&span.StatusMessage,
+			&span.ServiceName,
+			&span.Flags,
+			&resourceID,
+			&scopeID,
+		); err != nil {
+			return nil, fmt.Errorf("scan trace spans: %w", err)
+		}
+		var err error
+		span.Attributes, err = s.loadSpanAttributes(ctx, spanRowID)
+		if err != nil {
+			return nil, err
+		}
+		span.Resource, err = s.loadResource(ctx, resourceID)
+		if err != nil {
+			return nil, err
+		}
+		span.Scope, err = s.loadScope(ctx, scopeID)
+		if err != nil {
+			return nil, err
+		}
+		span.Events, err = s.loadEvents(ctx, spanRowID)
+		if err != nil {
+			return nil, err
+		}
+		span.Links, err = s.loadLinks(ctx, spanRowID)
+		if err != nil {
+			return nil, err
+		}
+		spans = append(spans, span)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate trace spans: %w", err)
+	}
+	return spans, nil
+}
+
 func buildSpanQuery(params spanstore.QueryParams) (string, []interface{}) {
 	args := []interface{}{params.Service, params.Start, params.End}
 	builder := strings.Builder{}
@@ -178,6 +282,53 @@ WHERE service_name = ? AND start_time_unix_nano >= ? AND start_time_unix_nano <=
 	builder.WriteString(` ORDER BY start_time_unix_nano DESC LIMIT ?`)
 	args = append(args, params.Limit)
 
+	return builder.String(), args
+}
+
+func buildTraceSummaryQuery(params spanstore.TraceQueryParams) (string, []interface{}) {
+	args := []interface{}{params.Service, params.Start, params.End}
+	builder := strings.Builder{}
+	builder.WriteString(`WITH candidate_traces AS (
+SELECT DISTINCT trace_id
+FROM spans
+WHERE service_name = ? AND start_time_unix_nano >= ? AND start_time_unix_nano <= ?`)
+
+	for _, filter := range params.AttrFilters {
+		builder.WriteString(` AND EXISTS (SELECT 1 FROM span_attributes sa WHERE sa.span_id = spans.id AND sa.key = ? AND sa.value = ?)`)
+		args = append(args, filter.Key, filter.Value)
+	}
+
+	builder.WriteString(`)
+SELECT s.trace_id,
+  (SELECT name FROM spans root WHERE root.trace_id = s.trace_id AND root.parent_span_id = ? ORDER BY root.start_time_unix_nano ASC LIMIT 1) AS root_name,
+  MIN(s.start_time_unix_nano) AS start_time_unix_nano,
+  MAX(s.end_time_unix_nano) AS end_time_unix_nano,
+  MAX(s.end_time_unix_nano) - MIN(s.start_time_unix_nano) AS duration_unix_nano,
+  COUNT(*) AS span_count,
+  SUM(CASE WHEN s.status_code = 2 THEN 1 ELSE 0 END) AS error_count,
+  ? AS service_name
+FROM spans s
+JOIN candidate_traces ct ON ct.trace_id = s.trace_id
+GROUP BY s.trace_id
+ORDER BY start_time_unix_nano DESC
+LIMIT ?`)
+
+	args = append(args, rootSpanParentID, params.Service, params.Limit)
+
+	return builder.String(), args
+}
+
+func buildTraceSpansQuery(traceID string, service string) (string, []interface{}) {
+	args := []interface{}{traceID}
+	builder := strings.Builder{}
+	builder.WriteString(`SELECT id, trace_id, span_id, parent_span_id, name, kind, start_time_unix_nano, end_time_unix_nano, status_code, status_message, service_name, flags, resource_id, scope_id
+FROM spans
+WHERE trace_id = ?`)
+	if strings.TrimSpace(service) != "" {
+		builder.WriteString(` AND service_name = ?`)
+		args = append(args, service)
+	}
+	builder.WriteString(` ORDER BY start_time_unix_nano ASC`)
 	return builder.String(), args
 }
 
