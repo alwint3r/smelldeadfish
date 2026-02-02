@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"deadfish/internal/spanstore"
+	"smelldeadfish/internal/spanstore"
 )
 
 const spansPath = "/api/spans"

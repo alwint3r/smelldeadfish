@@ -7,7 +7,7 @@ export function App() {
     <div class="app-shell">
       <header class="top-bar">
         <div class="brand">
-          <span class="brand-mark">deadfish</span>
+          <span class="brand-mark">smelldeadfish</span>
           <span class="brand-sub">Trace Explorer</span>
         </div>
         <div class="brand-meta">OTLP SQLite viewer</div>

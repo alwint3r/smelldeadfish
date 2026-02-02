@@ -12,7 +12,7 @@ import (
 
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 
-	"deadfish/internal/ingest"
+	"smelldeadfish/internal/ingest"
 )
 
 const (

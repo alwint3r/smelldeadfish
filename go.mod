@@ -1,4 +1,4 @@
-module deadfish
+module smelldeadfish
 
 go 1.25.6
 

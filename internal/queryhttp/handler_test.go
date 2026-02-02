@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"deadfish/internal/spanstore"
+	"smelldeadfish/internal/spanstore"
 )
 
 type fakeStore struct {

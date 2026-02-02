@@ -47,7 +47,7 @@ func sampleRequest() *coltracepb.ExportTraceServiceRequest {
 			{
 				Resource: &resourcepb.Resource{
 					Attributes: []*commonpb.KeyValue{
-						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "deadfish-demo"}}},
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "smelldeadfish-demo"}}},
 					},
 				},
 				ScopeSpans: []*tracepb.ScopeSpans{

@@ -1,4 +1,4 @@
-# Deadfish OTLP HTTP Receiver
+# Smelldeadfish OTLP HTTP Receiver
 
 This project provides a minimal Go service that receives OpenTelemetry Protocol (OTLP) traces over HTTP. There are two executables:
 
@@ -24,7 +24,7 @@ go run ./cmd/otlp-stdout -addr :14318
 The configurable server supports `-sink stdout` or `-sink sqlite` and an optional SQLite database path:
 
 ```
-go run ./cmd/otlp-server -sink sqlite -db ./deadfish.sqlite
+go run ./cmd/otlp-server -sink sqlite -db ./smelldeadfish.sqlite
 ```
 
 ## Send a sample trace
@@ -38,7 +38,7 @@ go run ./cmd/tracegen
 You should see a line like the following in the receiver output:
 
 ```
-span service=deadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7 parent_id=0000000000000000 name=GET /demo kind=SERVER duration=50ms attrs=2
+span service=smelldeadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7 parent_id=0000000000000000 name=GET /demo kind=SERVER duration=50ms attrs=2
 ```
 
 ## Query stored spans
@@ -46,7 +46,7 @@ span service=deadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f
 The query endpoint is only available when using the SQLite sink (`-sink sqlite`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
 
 ```
-curl "http://localhost:4318/api/spans?service=deadfish-demo&start=0&end=9999999999999999999&limit=5&attr=http.method=GET"
+curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&attr=http.method=GET"
 ```
 
 ## Query trace summaries
@@ -54,7 +54,7 @@ curl "http://localhost:4318/api/spans?service=deadfish-demo&start=0&end=99999999
 Trace summaries are only available when using the SQLite sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
 
 ```
-curl "http://localhost:4318/api/traces?service=deadfish-demo&start=0&end=9999999999999999999&limit=5"
+curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5"
 ```
 
 ## Query a trace detail

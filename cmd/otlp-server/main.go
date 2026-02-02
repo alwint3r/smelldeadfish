@@ -7,16 +7,16 @@ import (
 	"os"
 	"strings"
 
-	"deadfish/internal/ingest"
-	ingestsqlite "deadfish/internal/ingest/sqlite"
-	"deadfish/internal/otlphttp"
-	"deadfish/internal/queryhttp"
+	"smelldeadfish/internal/ingest"
+	ingestsqlite "smelldeadfish/internal/ingest/sqlite"
+	"smelldeadfish/internal/otlphttp"
+	"smelldeadfish/internal/queryhttp"
 )
 
 func main() {
 	addr := flag.String("addr", ":4318", "listen address")
 	sinkKind := flag.String("sink", "stdout", "trace sink: stdout or sqlite")
-	dbPath := flag.String("db", "./deadfish.sqlite", "sqlite database path")
+	dbPath := flag.String("db", "./smelldeadfish.sqlite", "sqlite database path")
 	flag.Parse()
 
 	var sink ingest.TraceSink

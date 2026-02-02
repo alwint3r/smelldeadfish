@@ -13,8 +13,8 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"deadfish/internal/ingest"
-	"deadfish/internal/spanstore"
+	"smelldeadfish/internal/ingest"
+	"smelldeadfish/internal/spanstore"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )

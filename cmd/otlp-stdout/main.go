@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"deadfish/internal/ingest"
-	"deadfish/internal/otlphttp"
+	"smelldeadfish/internal/ingest"
+	"smelldeadfish/internal/otlphttp"
 )
 
 func main() {

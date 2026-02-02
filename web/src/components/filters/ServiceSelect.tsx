@@ -18,7 +18,7 @@ export function ServiceSelect({
         type="text"
         value={value}
         onInput={(event) => onChange((event.target as HTMLInputElement).value)}
-        placeholder="deadfish-demo"
+        placeholder="smelldeadfish-demo"
       />
       {error ? <div class="field-error">{error}</div> : null}
     </div>

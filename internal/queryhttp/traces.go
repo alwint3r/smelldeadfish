@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"deadfish/internal/spanstore"
+	"smelldeadfish/internal/spanstore"
 )
 
 const tracesPath = "/api/traces"
