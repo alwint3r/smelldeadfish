@@ -2,6 +2,8 @@ package sqlite
 
 const schema = `
 PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS resources (
   id TEXT PRIMARY KEY,
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS spans (
 );
 
 CREATE INDEX IF NOT EXISTS spans_service_time_idx ON spans(service_name, start_time_unix_nano);
+CREATE INDEX IF NOT EXISTS spans_trace_time_idx ON spans(trace_id, start_time_unix_nano);
 
 CREATE TABLE IF NOT EXISTS span_attributes (
   span_id TEXT NOT NULL,
@@ -65,6 +68,7 @@ CREATE TABLE IF NOT EXISTS span_attributes (
 
 CREATE INDEX IF NOT EXISTS span_attributes_key_value_idx ON span_attributes(key, value);
 CREATE INDEX IF NOT EXISTS span_attributes_span_idx ON span_attributes(span_id);
+CREATE INDEX IF NOT EXISTS span_attributes_span_key_value_idx ON span_attributes(span_id, key, value);
 
 CREATE TABLE IF NOT EXISTS span_events (
   id TEXT PRIMARY KEY,

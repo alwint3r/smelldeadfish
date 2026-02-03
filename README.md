@@ -27,6 +27,8 @@ The configurable server supports `-sink stdout` or `-sink sqlite` and an optiona
 go run ./cmd/otlp-server -sink sqlite -db ./smelldeadfish.sqlite
 ```
 
+When using the SQLite sink, ingestion is buffered by an in-memory queue to smooth bursts. Use `-queue-size` to set the maximum queued requests (default 10000); when full, OTLP requests will block until space is available. The SQLite store runs in WAL mode with `synchronous=NORMAL` and retries transient busy locks for a short period so read queries can continue during writes.
+
 ## Send a sample trace
 
 In another terminal, run the trace generator:

@@ -191,3 +191,172 @@ func TestSQLiteSinkQueryTracesOrdersWithoutAmbiguity(t *testing.T) {
 		t.Fatalf("expected trace_id to be populated")
 	}
 }
+
+func TestSQLiteSinkQuerySpansBatchLoadsAttributes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.sqlite")
+
+	sink, err := New(path)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Fatalf("close sink: %v", err)
+		}
+	}()
+
+	start := uint64(time.Now().Add(-30 * time.Millisecond).UnixNano())
+	end := uint64(time.Now().UnixNano())
+	req := &coltracepb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "batch-service"}}},
+						{Key: "resource.attr", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "r1"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Scope: &commonpb.InstrumentationScope{Name: "scope", Version: "v1"},
+						Spans: []*tracepb.Span{
+							{
+								TraceId:           []byte{0x21, 0x22},
+								SpanId:            []byte{0x31, 0x32},
+								Name:              "span-a",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Attributes: []*commonpb.KeyValue{
+									{Key: "http.method", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "POST"}}},
+								},
+								Events: []*tracepb.Span_Event{
+									{Name: "event-a", TimeUnixNano: end},
+								},
+								Links: []*tracepb.Span_Link{
+									{TraceId: []byte{0x41, 0x42}, SpanId: []byte{0x51, 0x52}, TraceState: "demo=2"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := sink.Consume(context.Background(), req); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	spans, err := sink.QuerySpans(context.Background(), spanstore.QueryParams{
+		Service: "batch-service",
+		Start:   int64(start) - int64(time.Millisecond),
+		End:     int64(end) + int64(time.Millisecond),
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("query spans: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("expected one span, got %d", len(spans))
+	}
+	span := spans[0]
+	if span.Attributes["http.method"] != "POST" {
+		t.Fatalf("expected span attribute to load, got %+v", span.Attributes)
+	}
+	if span.Resource.Attributes["resource.attr"] != "r1" {
+		t.Fatalf("expected resource attribute to load, got %+v", span.Resource.Attributes)
+	}
+	if span.Scope.Name != "scope" {
+		t.Fatalf("expected scope to load, got %+v", span.Scope)
+	}
+	if len(span.Events) != 1 || span.Events[0].Name != "event-a" {
+		t.Fatalf("expected event to load, got %+v", span.Events)
+	}
+	if len(span.Links) != 1 || span.Links[0].TraceState != "demo=2" {
+		t.Fatalf("expected link to load, got %+v", span.Links)
+	}
+}
+
+func TestSQLiteSinkQueryRetriesOnBusy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.sqlite")
+
+	sink, err := New(path)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Fatalf("close sink: %v", err)
+		}
+	}()
+
+	start := uint64(time.Now().Add(-40 * time.Millisecond).UnixNano())
+	end := uint64(time.Now().UnixNano())
+	req := &coltracepb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "busy-service"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Scope: &commonpb.InstrumentationScope{Name: "scope", Version: "v1"},
+						Spans: []*tracepb.Span{
+							{
+								TraceId:           []byte{0x61, 0x62},
+								SpanId:            []byte{0x71, 0x72},
+								Name:              "span",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := sink.Consume(context.Background(), req); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	lockConn, err := sink.DB().Conn(context.Background())
+	if err != nil {
+		t.Fatalf("lock conn: %v", err)
+	}
+	_, err = lockConn.ExecContext(context.Background(), "BEGIN EXCLUSIVE")
+	if err != nil {
+		lockConn.Close()
+		t.Fatalf("begin exclusive: %v", err)
+	}
+
+	release := make(chan struct{})
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_, _ = lockConn.ExecContext(context.Background(), "COMMIT")
+		_ = lockConn.Close()
+		close(release)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	spans, err := sink.QuerySpans(ctx, spanstore.QueryParams{
+		Service: "busy-service",
+		Start:   int64(start) - int64(time.Millisecond),
+		End:     int64(end) + int64(time.Millisecond),
+		Limit:   5,
+	})
+	if err != nil {
+		t.Fatalf("query spans: %v", err)
+	}
+	<-release
+	if len(spans) != 1 {
+		t.Fatalf("expected one span, got %d", len(spans))
+	}
+}

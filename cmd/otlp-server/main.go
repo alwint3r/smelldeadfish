@@ -18,6 +18,7 @@ func main() {
 	addr := flag.String("addr", ":4318", "listen address")
 	sinkKind := flag.String("sink", "stdout", "trace sink: stdout or sqlite")
 	dbPath := flag.String("db", "./smelldeadfish.sqlite", "sqlite database path")
+	queueSize := flag.Int("queue-size", 10000, "max queued trace requests for sqlite sink before backpressure")
 	uiEnabled := flag.Bool("ui", true, "serve embedded UI (requires uiembed build tag)")
 	flag.Parse()
 
@@ -37,18 +38,21 @@ func main() {
 		if err != nil {
 			log.Fatalf("open sqlite: %v", err)
 		}
-		defer func() {
-			if err := sqliteSink.Close(); err != nil {
-				log.Printf("close sqlite: %v", err)
-			}
-		}()
-		sink = sqliteSink
+		sink = ingest.NewQueueSink(sqliteSink, ingest.QueueOptions{Size: *queueSize, Logger: logger})
 		queryOpts := queryhttp.Options{Logger: logger}
 		spanQueryHandler = queryhttp.NewHandlerWithOptions(sqliteSink, queryOpts)
 		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(sqliteSink, queryOpts)
 		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(sqliteSink, queryOpts)
 	default:
 		log.Fatalf("unknown sink: %s", *sinkKind)
+	}
+
+	if closer, ok := sink.(interface{ Close() error }); ok {
+		defer func() {
+			if err := closer.Close(); err != nil {
+				log.Printf("close sink: %v", err)
+			}
+		}()
 	}
 
 	otlpHandler := otlphttp.NewHandler(sink, otlphttp.Options{Logger: logger})

@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -14,20 +17,26 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	sqlitedriver "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 	"smelldeadfish/internal/ingest"
 	"smelldeadfish/internal/spanstore"
 )
 
 const (
-	attrTypeString   = "string"
-	attrTypeInt      = "int"
-	attrTypeDouble   = "double"
-	attrTypeBool     = "bool"
-	attrTypeBytes    = "bytes"
-	attrTypeArray    = "array"
-	attrTypeKVList   = "kvlist"
-	rootSpanParentID = "0000000000000000"
+	attrTypeString      = "string"
+	attrTypeInt         = "int"
+	attrTypeDouble      = "double"
+	attrTypeBool        = "bool"
+	attrTypeBytes       = "bytes"
+	attrTypeArray       = "array"
+	attrTypeKVList      = "kvlist"
+	rootSpanParentID    = "0000000000000000"
+	defaultBusyTimeout  = 2 * time.Second
+	defaultRetryTimeout = 5 * time.Second
+	minRetryBackoff     = 25 * time.Millisecond
+	maxRetryBackoff     = 250 * time.Millisecond
+	maxBatchSize        = 200
 )
 
 type Sink struct {
@@ -44,6 +53,73 @@ func New(path string) (*Sink, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 	return &Sink{db: db}, nil
+}
+
+func (s *Sink) withConn(ctx context.Context, fn func(*sql.Conn) error) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("sqlite connection unavailable")
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("open connection: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", int(defaultBusyTimeout.Milliseconds()))); err != nil {
+		return fmt.Errorf("set busy timeout: %w", err)
+	}
+	return fn(conn)
+}
+
+func withRetry(ctx context.Context, timeout time.Duration, fn func(context.Context) error) error {
+	start := time.Now()
+	deadline, hasDeadline := ctx.Deadline()
+	if timeout <= 0 {
+		timeout = defaultRetryTimeout
+	}
+	backoff := minRetryBackoff
+	for {
+		if hasDeadline && time.Now().After(deadline) {
+			return ctx.Err()
+		}
+		if err := fn(ctx); err != nil {
+			if !isBusyError(err) {
+				return err
+			}
+			if time.Since(start) >= timeout {
+				return err
+			}
+			sleep := backoff
+			jitterRange := backoff / 2
+			if jitterRange > 0 {
+				sleep += time.Duration(time.Now().UnixNano() % int64(jitterRange))
+			}
+			timer := time.NewTimer(sleep)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+			backoff *= 2
+			if backoff > maxRetryBackoff {
+				backoff = maxRetryBackoff
+			}
+			continue
+		}
+		return nil
+	}
+}
+
+func isBusyError(err error) bool {
+	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) {
+		if sqliteErr.Code() == sqlite3.SQLITE_BUSY || sqliteErr.Code() == sqlite3.SQLITE_LOCKED {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "sqlite_busy") ||
+		strings.Contains(strings.ToLower(err.Error()), "sqlite_locked") ||
+		strings.Contains(strings.ToLower(err.Error()), "database is locked")
 }
 
 func (s *Sink) Close() error {
@@ -64,18 +140,22 @@ func (s *Sink) Consume(ctx context.Context, req *coltracepb.ExportTraceServiceRe
 	if s == nil || s.db == nil || req == nil {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	if err := s.consumeTx(ctx, tx, req); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return withRetry(ctx, defaultRetryTimeout, func(ctx context.Context) error {
+		return s.withConn(ctx, func(conn *sql.Conn) error {
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("begin transaction: %w", err)
+			}
+			if err := s.consumeTx(ctx, tx, req); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("commit transaction: %w", err)
+			}
+			return nil
+		})
+	})
 }
 
 func (s *Sink) consumeTx(ctx context.Context, tx *sql.Tx, req *coltracepb.ExportTraceServiceRequest) error {
@@ -105,61 +185,89 @@ func (s *Sink) QuerySpans(ctx context.Context, params spanstore.QueryParams) ([]
 		params.Limit = 100
 	}
 	query, args := buildSpanQuery(params)
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query spans: %w", err)
-	}
-	defer rows.Close()
-
 	var spans []spanstore.Span
-	for rows.Next() {
-		var spanRowID string
-		var resourceID string
-		var scopeID string
-		span := spanstore.Span{}
-		if err := rows.Scan(
-			&spanRowID,
-			&span.TraceID,
-			&span.SpanID,
-			&span.ParentSpanID,
-			&span.Name,
-			&span.Kind,
-			&span.StartTimeUnixNano,
-			&span.EndTimeUnixNano,
-			&span.StatusCode,
-			&span.StatusMessage,
-			&span.ServiceName,
-			&span.Flags,
-			&resourceID,
-			&scopeID,
-		); err != nil {
-			return nil, fmt.Errorf("scan spans: %w", err)
-		}
-		var err error
-		span.Attributes, err = s.loadSpanAttributes(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		span.Resource, err = s.loadResource(ctx, resourceID)
-		if err != nil {
-			return nil, err
-		}
-		span.Scope, err = s.loadScope(ctx, scopeID)
-		if err != nil {
-			return nil, err
-		}
-		span.Events, err = s.loadEvents(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		span.Links, err = s.loadLinks(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		spans = append(spans, span)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate spans: %w", err)
+	err := withRetry(ctx, defaultRetryTimeout, func(ctx context.Context) error {
+		return s.withConn(ctx, func(conn *sql.Conn) error {
+			spans = nil
+			rows, err := conn.QueryContext(ctx, query, args...)
+			if err != nil {
+				return fmt.Errorf("query spans: %w", err)
+			}
+			defer rows.Close()
+
+			spanIDs := make([]string, 0, params.Limit)
+			resourceIDs := make([]string, 0, params.Limit)
+			scopeIDs := make([]string, 0, params.Limit)
+			for rows.Next() {
+				var spanRowID string
+				var resourceID string
+				var scopeID string
+				span := spanstore.Span{}
+				if err := rows.Scan(
+					&spanRowID,
+					&span.TraceID,
+					&span.SpanID,
+					&span.ParentSpanID,
+					&span.Name,
+					&span.Kind,
+					&span.StartTimeUnixNano,
+					&span.EndTimeUnixNano,
+					&span.StatusCode,
+					&span.StatusMessage,
+					&span.ServiceName,
+					&span.Flags,
+					&resourceID,
+					&scopeID,
+				); err != nil {
+					return fmt.Errorf("scan spans: %w", err)
+				}
+				spans = append(spans, span)
+				spanIDs = append(spanIDs, spanRowID)
+				resourceIDs = append(resourceIDs, resourceID)
+				scopeIDs = append(scopeIDs, scopeID)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate spans: %w", err)
+			}
+			if len(spans) == 0 {
+				return nil
+			}
+			attrMap, err := s.loadSpanAttributesBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			resources, err := s.loadResourcesBatch(ctx, conn, resourceIDs)
+			if err != nil {
+				return err
+			}
+			scopes, err := s.loadScopesBatch(ctx, conn, scopeIDs)
+			if err != nil {
+				return err
+			}
+			events, err := s.loadEventsBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			links, err := s.loadLinksBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			for i, span := range spans {
+				spanID := spanIDs[i]
+				resourceID := resourceIDs[i]
+				scopeID := scopeIDs[i]
+				span.Attributes = attrMap[spanID]
+				span.Resource = resources[resourceID]
+				span.Scope = scopes[scopeID]
+				span.Events = events[spanID]
+				span.Links = links[spanID]
+				spans[i] = span
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
 	}
 	return spans, nil
 }
@@ -172,35 +280,44 @@ func (s *Sink) QueryTraces(ctx context.Context, params spanstore.TraceQueryParam
 		params.Order = spanstore.TraceOrderStartDesc
 	}
 	query, args := buildTraceSummaryQuery(params)
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query traces: %w", err)
-	}
-	defer rows.Close()
-
 	var summaries []spanstore.TraceSummary
-	for rows.Next() {
-		var rootName sql.NullString
-		summary := spanstore.TraceSummary{}
-		if err := rows.Scan(
-			&summary.TraceID,
-			&rootName,
-			&summary.StartTimeUnixNano,
-			&summary.EndTimeUnixNano,
-			&summary.DurationUnixNano,
-			&summary.SpanCount,
-			&summary.ErrorCount,
-			&summary.ServiceName,
-		); err != nil {
-			return nil, fmt.Errorf("scan traces: %w", err)
-		}
-		if rootName.Valid {
-			summary.RootName = rootName.String
-		}
-		summaries = append(summaries, summary)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate traces: %w", err)
+	err := withRetry(ctx, defaultRetryTimeout, func(ctx context.Context) error {
+		return s.withConn(ctx, func(conn *sql.Conn) error {
+			summaries = nil
+			rows, err := conn.QueryContext(ctx, query, args...)
+			if err != nil {
+				return fmt.Errorf("query traces: %w", err)
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var rootName sql.NullString
+				summary := spanstore.TraceSummary{}
+				if err := rows.Scan(
+					&summary.TraceID,
+					&rootName,
+					&summary.StartTimeUnixNano,
+					&summary.EndTimeUnixNano,
+					&summary.DurationUnixNano,
+					&summary.SpanCount,
+					&summary.ErrorCount,
+					&summary.ServiceName,
+				); err != nil {
+					return fmt.Errorf("scan traces: %w", err)
+				}
+				if rootName.Valid {
+					summary.RootName = rootName.String
+				}
+				summaries = append(summaries, summary)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate traces: %w", err)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
 	}
 	return summaries, nil
 }
@@ -211,61 +328,89 @@ func (s *Sink) QueryTraceSpans(ctx context.Context, traceID string, service stri
 		return nil, fmt.Errorf("trace_id is required")
 	}
 	query, args := buildTraceSpansQuery(traceID, service)
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query trace spans: %w", err)
-	}
-	defer rows.Close()
-
 	var spans []spanstore.Span
-	for rows.Next() {
-		var spanRowID string
-		var resourceID string
-		var scopeID string
-		span := spanstore.Span{}
-		if err := rows.Scan(
-			&spanRowID,
-			&span.TraceID,
-			&span.SpanID,
-			&span.ParentSpanID,
-			&span.Name,
-			&span.Kind,
-			&span.StartTimeUnixNano,
-			&span.EndTimeUnixNano,
-			&span.StatusCode,
-			&span.StatusMessage,
-			&span.ServiceName,
-			&span.Flags,
-			&resourceID,
-			&scopeID,
-		); err != nil {
-			return nil, fmt.Errorf("scan trace spans: %w", err)
-		}
-		var err error
-		span.Attributes, err = s.loadSpanAttributes(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		span.Resource, err = s.loadResource(ctx, resourceID)
-		if err != nil {
-			return nil, err
-		}
-		span.Scope, err = s.loadScope(ctx, scopeID)
-		if err != nil {
-			return nil, err
-		}
-		span.Events, err = s.loadEvents(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		span.Links, err = s.loadLinks(ctx, spanRowID)
-		if err != nil {
-			return nil, err
-		}
-		spans = append(spans, span)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate trace spans: %w", err)
+	err := withRetry(ctx, defaultRetryTimeout, func(ctx context.Context) error {
+		return s.withConn(ctx, func(conn *sql.Conn) error {
+			spans = nil
+			rows, err := conn.QueryContext(ctx, query, args...)
+			if err != nil {
+				return fmt.Errorf("query trace spans: %w", err)
+			}
+			defer rows.Close()
+
+			spanIDs := make([]string, 0, 16)
+			resourceIDs := make([]string, 0, 16)
+			scopeIDs := make([]string, 0, 16)
+			for rows.Next() {
+				var spanRowID string
+				var resourceID string
+				var scopeID string
+				span := spanstore.Span{}
+				if err := rows.Scan(
+					&spanRowID,
+					&span.TraceID,
+					&span.SpanID,
+					&span.ParentSpanID,
+					&span.Name,
+					&span.Kind,
+					&span.StartTimeUnixNano,
+					&span.EndTimeUnixNano,
+					&span.StatusCode,
+					&span.StatusMessage,
+					&span.ServiceName,
+					&span.Flags,
+					&resourceID,
+					&scopeID,
+				); err != nil {
+					return fmt.Errorf("scan trace spans: %w", err)
+				}
+				spans = append(spans, span)
+				spanIDs = append(spanIDs, spanRowID)
+				resourceIDs = append(resourceIDs, resourceID)
+				scopeIDs = append(scopeIDs, scopeID)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate trace spans: %w", err)
+			}
+			if len(spans) == 0 {
+				return nil
+			}
+			attrMap, err := s.loadSpanAttributesBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			resources, err := s.loadResourcesBatch(ctx, conn, resourceIDs)
+			if err != nil {
+				return err
+			}
+			scopes, err := s.loadScopesBatch(ctx, conn, scopeIDs)
+			if err != nil {
+				return err
+			}
+			events, err := s.loadEventsBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			links, err := s.loadLinksBatch(ctx, conn, spanIDs)
+			if err != nil {
+				return err
+			}
+			for i, span := range spans {
+				spanID := spanIDs[i]
+				resourceID := resourceIDs[i]
+				scopeID := scopeIDs[i]
+				span.Attributes = attrMap[spanID]
+				span.Resource = resources[resourceID]
+				span.Scope = scopes[scopeID]
+				span.Events = events[spanID]
+				span.Links = links[spanID]
+				spans[i] = span
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
 	}
 	return spans, nil
 }
@@ -500,6 +645,61 @@ func (s *Sink) insertLinks(ctx context.Context, tx *sql.Tx, spanID string, links
 	return nil
 }
 
+func buildInQuery(prefix string, ids []string) (string, []interface{}) {
+	builder := strings.Builder{}
+	builder.WriteString(prefix)
+	builder.WriteString("(")
+	args := make([]interface{}, 0, len(ids))
+	for i, id := range ids {
+		if i > 0 {
+			builder.WriteString(",")
+		}
+		builder.WriteString("?")
+		args = append(args, id)
+	}
+	builder.WriteString(")")
+	return builder.String(), args
+}
+
+func chunkIDs(ids []string, size int) [][]string {
+	if size <= 0 || len(ids) <= size {
+		return [][]string{ids}
+	}
+	chunks := make([][]string, 0, (len(ids)+size-1)/size)
+	for start := 0; start < len(ids); start += size {
+		end := start + size
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[start:end])
+	}
+	return chunks
+}
+
+func sortEvents(events []spanstore.Event) {
+	if len(events) < 2 {
+		return
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].TimeUnixNano == events[j].TimeUnixNano {
+			return events[i].Name < events[j].Name
+		}
+		return events[i].TimeUnixNano < events[j].TimeUnixNano
+	})
+}
+
+func sortLinks(links []spanstore.Link) {
+	if len(links) < 2 {
+		return
+	}
+	sort.Slice(links, func(i, j int) bool {
+		if links[i].TraceID == links[j].TraceID {
+			return links[i].SpanID < links[j].SpanID
+		}
+		return links[i].TraceID < links[j].TraceID
+	})
+}
+
 func (s *Sink) insertAttributes(ctx context.Context, tx *sql.Tx, table, idColumn, id string, attrs []*commonpb.KeyValue) error {
 	for _, attr := range attrs {
 		attrType, attrValue, err := formatAttributeValue(attr.GetValue())
@@ -521,102 +721,254 @@ func (s *Sink) insertAttributes(ctx context.Context, tx *sql.Tx, table, idColumn
 	return nil
 }
 
-func (s *Sink) loadSpanAttributes(ctx context.Context, spanID string) (map[string]interface{}, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT key, type, value FROM span_attributes WHERE span_id = ?", spanID)
-	if err != nil {
-		return nil, fmt.Errorf("load span attributes: %w", err)
+func (s *Sink) loadSpanAttributesBatch(ctx context.Context, conn *sql.Conn, spanIDs []string) (map[string]map[string]interface{}, error) {
+	result := make(map[string]map[string]interface{}, len(spanIDs))
+	if len(spanIDs) == 0 {
+		return result, nil
 	}
-	defer rows.Close()
-	return readAttributes(rows)
-}
-
-func (s *Sink) loadResource(ctx context.Context, resourceID string) (spanstore.Resource, error) {
-	resource := spanstore.Resource{Attributes: map[string]interface{}{}}
-	row := s.db.QueryRowContext(ctx, "SELECT schema_url FROM resources WHERE id = ?", resourceID)
-	if err := row.Scan(&resource.SchemaURL); err != nil {
-		return resource, fmt.Errorf("load resource: %w", err)
-	}
-	attrs, err := s.loadAttributes(ctx, "resource_attributes", "resource_id", resourceID)
-	if err != nil {
-		return resource, err
-	}
-	resource.Attributes = attrs
-	return resource, nil
-}
-
-func (s *Sink) loadScope(ctx context.Context, scopeID string) (spanstore.Scope, error) {
-	scope := spanstore.Scope{Attributes: map[string]interface{}{}}
-	row := s.db.QueryRowContext(ctx, "SELECT name, version, schema_url FROM scopes WHERE id = ?", scopeID)
-	if err := row.Scan(&scope.Name, &scope.Version, &scope.SchemaURL); err != nil {
-		return scope, fmt.Errorf("load scope: %w", err)
-	}
-	attrs, err := s.loadAttributes(ctx, "scope_attributes", "scope_id", scopeID)
-	if err != nil {
-		return scope, err
-	}
-	scope.Attributes = attrs
-	return scope, nil
-}
-
-func (s *Sink) loadAttributes(ctx context.Context, table, idColumn, id string) (map[string]interface{}, error) {
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("SELECT key, type, value FROM %s WHERE %s = ?", table, idColumn), id)
-	if err != nil {
-		return nil, fmt.Errorf("load attributes: %w", err)
-	}
-	defer rows.Close()
-	return readAttributes(rows)
-}
-
-func (s *Sink) loadEvents(ctx context.Context, spanID string) ([]spanstore.Event, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, time_unix_nano, dropped_attributes_count FROM span_events WHERE span_id = ? ORDER BY time_unix_nano", spanID)
-	if err != nil {
-		return nil, fmt.Errorf("load events: %w", err)
-	}
-	defer rows.Close()
-	var events []spanstore.Event
-	for rows.Next() {
-		var eventID string
-		event := spanstore.Event{Attributes: map[string]interface{}{}}
-		if err := rows.Scan(&eventID, &event.Name, &event.TimeUnixNano, &event.DroppedAttributesCount); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
-		}
-		attrs, err := s.loadAttributes(ctx, "span_event_attributes", "event_id", eventID)
+	for _, batch := range chunkIDs(spanIDs, maxBatchSize) {
+		query, args := buildInQuery("SELECT span_id, key, type, value FROM span_attributes WHERE span_id IN ", batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("load span attributes: %w", err)
 		}
-		event.Attributes = attrs
-		events = append(events, event)
+		for rows.Next() {
+			var spanID string
+			var key string
+			var attrType string
+			var value string
+			if err := rows.Scan(&spanID, &key, &attrType, &value); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan span attribute: %w", err)
+			}
+			attrs := result[spanID]
+			if attrs == nil {
+				attrs = map[string]interface{}{}
+				result[spanID] = attrs
+			}
+			attrs[key] = parseAttributeValue(attrType, value)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate span attributes: %w", err)
+		}
+		_ = rows.Close()
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate events: %w", err)
-	}
-	return events, nil
+	return result, nil
 }
 
-func (s *Sink) loadLinks(ctx context.Context, spanID string) ([]spanstore.Link, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, trace_id, linked_span_id, trace_state, dropped_attributes_count, flags FROM span_links WHERE span_id = ? ORDER BY id", spanID)
-	if err != nil {
-		return nil, fmt.Errorf("load links: %w", err)
+func (s *Sink) loadResourcesBatch(ctx context.Context, conn *sql.Conn, resourceIDs []string) (map[string]spanstore.Resource, error) {
+	result := make(map[string]spanstore.Resource, len(resourceIDs))
+	if len(resourceIDs) == 0 {
+		return result, nil
 	}
-	defer rows.Close()
-	var links []spanstore.Link
-	for rows.Next() {
-		var linkID string
-		link := spanstore.Link{Attributes: map[string]interface{}{}}
-		if err := rows.Scan(&linkID, &link.TraceID, &link.SpanID, &link.TraceState, &link.DroppedAttributesCount, &link.Flags); err != nil {
-			return nil, fmt.Errorf("scan link: %w", err)
-		}
-		attrs, err := s.loadAttributes(ctx, "span_link_attributes", "link_id", linkID)
+	for _, batch := range chunkIDs(resourceIDs, maxBatchSize) {
+		query, args := buildInQuery("SELECT id, schema_url FROM resources WHERE id IN ", batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("load resources: %w", err)
 		}
-		link.Attributes = attrs
-		links = append(links, link)
+		for rows.Next() {
+			var id string
+			var schemaURL string
+			if err := rows.Scan(&id, &schemaURL); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan resource: %w", err)
+			}
+			result[id] = spanstore.Resource{SchemaURL: schemaURL, Attributes: map[string]interface{}{}}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate resources: %w", err)
+		}
+		_ = rows.Close()
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate links: %w", err)
+	attrs, err := s.loadAttributesBatch(ctx, conn, "resource_attributes", "resource_id", resourceIDs)
+	if err != nil {
+		return nil, err
 	}
-	return links, nil
+	for id, resource := range result {
+		if attrMap, ok := attrs[id]; ok {
+			resource.Attributes = attrMap
+			result[id] = resource
+		}
+	}
+	return result, nil
+}
+
+func (s *Sink) loadScopesBatch(ctx context.Context, conn *sql.Conn, scopeIDs []string) (map[string]spanstore.Scope, error) {
+	result := make(map[string]spanstore.Scope, len(scopeIDs))
+	if len(scopeIDs) == 0 {
+		return result, nil
+	}
+	for _, batch := range chunkIDs(scopeIDs, maxBatchSize) {
+		query, args := buildInQuery("SELECT id, name, version, schema_url FROM scopes WHERE id IN ", batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("load scopes: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			scope := spanstore.Scope{Attributes: map[string]interface{}{}}
+			if err := rows.Scan(&id, &scope.Name, &scope.Version, &scope.SchemaURL); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan scope: %w", err)
+			}
+			result[id] = scope
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate scopes: %w", err)
+		}
+		_ = rows.Close()
+	}
+	attrs, err := s.loadAttributesBatch(ctx, conn, "scope_attributes", "scope_id", scopeIDs)
+	if err != nil {
+		return nil, err
+	}
+	for id, scope := range result {
+		if attrMap, ok := attrs[id]; ok {
+			scope.Attributes = attrMap
+			result[id] = scope
+		}
+	}
+	return result, nil
+}
+
+func (s *Sink) loadAttributesBatch(ctx context.Context, conn *sql.Conn, table, idColumn string, ids []string) (map[string]map[string]interface{}, error) {
+	result := make(map[string]map[string]interface{}, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	for _, batch := range chunkIDs(ids, maxBatchSize) {
+		query, args := buildInQuery(fmt.Sprintf("SELECT %s, key, type, value FROM %s WHERE %s IN ", idColumn, table, idColumn), batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("load attributes: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			var key string
+			var attrType string
+			var value string
+			if err := rows.Scan(&id, &key, &attrType, &value); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan attributes: %w", err)
+			}
+			attrs := result[id]
+			if attrs == nil {
+				attrs = map[string]interface{}{}
+				result[id] = attrs
+			}
+			attrs[key] = parseAttributeValue(attrType, value)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate attributes: %w", err)
+		}
+		_ = rows.Close()
+	}
+	return result, nil
+}
+
+func (s *Sink) loadEventsBatch(ctx context.Context, conn *sql.Conn, spanIDs []string) (map[string][]spanstore.Event, error) {
+	result := make(map[string][]spanstore.Event, len(spanIDs))
+	if len(spanIDs) == 0 {
+		return result, nil
+	}
+	eventIDs := make([]string, 0)
+	eventByID := make(map[string]*spanstore.Event)
+	eventSpan := make(map[string]string)
+	for _, batch := range chunkIDs(spanIDs, maxBatchSize) {
+		query, args := buildInQuery("SELECT id, span_id, name, time_unix_nano, dropped_attributes_count FROM span_events WHERE span_id IN ", batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("load events: %w", err)
+		}
+		for rows.Next() {
+			var eventID string
+			var spanID string
+			event := spanstore.Event{Attributes: map[string]interface{}{}}
+			if err := rows.Scan(&eventID, &spanID, &event.Name, &event.TimeUnixNano, &event.DroppedAttributesCount); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan event: %w", err)
+			}
+			eventIDs = append(eventIDs, eventID)
+			eventCopy := event
+			eventByID[eventID] = &eventCopy
+			eventSpan[eventID] = spanID
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate events: %w", err)
+		}
+		_ = rows.Close()
+	}
+	attrMap, err := s.loadAttributesBatch(ctx, conn, "span_event_attributes", "event_id", eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	for eventID, event := range eventByID {
+		if attrs, ok := attrMap[eventID]; ok {
+			event.Attributes = attrs
+		}
+		spanID := eventSpan[eventID]
+		result[spanID] = append(result[spanID], *event)
+	}
+	for spanID := range result {
+		sortEvents(result[spanID])
+	}
+	return result, nil
+}
+
+func (s *Sink) loadLinksBatch(ctx context.Context, conn *sql.Conn, spanIDs []string) (map[string][]spanstore.Link, error) {
+	result := make(map[string][]spanstore.Link, len(spanIDs))
+	if len(spanIDs) == 0 {
+		return result, nil
+	}
+	linkIDs := make([]string, 0)
+	linkByID := make(map[string]*spanstore.Link)
+	linkSpan := make(map[string]string)
+	for _, batch := range chunkIDs(spanIDs, maxBatchSize) {
+		query, args := buildInQuery("SELECT id, span_id, trace_id, linked_span_id, trace_state, dropped_attributes_count, flags FROM span_links WHERE span_id IN ", batch)
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("load links: %w", err)
+		}
+		for rows.Next() {
+			var linkID string
+			var spanID string
+			link := spanstore.Link{Attributes: map[string]interface{}{}}
+			if err := rows.Scan(&linkID, &spanID, &link.TraceID, &link.SpanID, &link.TraceState, &link.DroppedAttributesCount, &link.Flags); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan link: %w", err)
+			}
+			linkIDs = append(linkIDs, linkID)
+			linkCopy := link
+			linkByID[linkID] = &linkCopy
+			linkSpan[linkID] = spanID
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate links: %w", err)
+		}
+		_ = rows.Close()
+	}
+	attrMap, err := s.loadAttributesBatch(ctx, conn, "span_link_attributes", "link_id", linkIDs)
+	if err != nil {
+		return nil, err
+	}
+	for linkID, link := range linkByID {
+		if attrs, ok := attrMap[linkID]; ok {
+			link.Attributes = attrs
+		}
+		spanID := linkSpan[linkID]
+		result[spanID] = append(result[spanID], *link)
+	}
+	for spanID := range result {
+		sortLinks(result[spanID])
+	}
+	return result, nil
 }
 
 func formatAttributeValue(value *commonpb.AnyValue) (string, string, error) {
