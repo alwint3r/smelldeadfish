@@ -15,7 +15,7 @@ func main() {
 	flag.Parse()
 
 	sink := ingest.NewStdoutSink(os.Stdout)
-	handler := otlphttp.NewHandler(sink, otlphttp.Options{})
+	handler := otlphttp.NewHandler(sink, otlphttp.Options{Logger: log.Default()})
 
 	server := &http.Server{Addr: *addr, Handler: handler}
 	log.Printf("OTLP HTTP receiver listening on %s", *addr)

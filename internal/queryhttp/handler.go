@@ -2,10 +2,13 @@ package queryhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"smelldeadfish/internal/spanstore"
 )
@@ -15,7 +18,8 @@ const spansPath = "/api/spans"
 const defaultLimit = 100
 
 type Handler struct {
-	store spanstore.Store
+	store  spanstore.Store
+	logger *log.Logger
 }
 
 type SpansResponse struct {
@@ -23,32 +27,43 @@ type SpansResponse struct {
 }
 
 func NewHandler(store spanstore.Store) http.Handler {
-	return &Handler{store: store}
+	return NewHandlerWithOptions(store, Options{})
+}
+
+func NewHandlerWithOptions(store spanstore.Store, opts Options) http.Handler {
+	return &Handler{store: store, logger: loggerFromOptions(opts)}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
 	if r.URL.Path != spansPath {
+		logRequestError(h.logger, "query_spans", r, http.StatusNotFound, start, errors.New("not found"), service)
 		http.NotFound(w, r)
 		return
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
+		logRequestError(h.logger, "query_spans", r, http.StatusMethodNotAllowed, start, errors.New("method not allowed"), service)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	params, err := parseQueryParams(r)
 	if err != nil {
+		logRequestError(h.logger, "query_spans", r, http.StatusBadRequest, start, err, service)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	spans, err := h.store.QuerySpans(r.Context(), params)
 	if err != nil {
+		logRequestError(h.logger, "query_spans", r, http.StatusInternalServerError, start, err, params.Service)
 		http.Error(w, "failed to query spans", http.StatusInternalServerError)
 		return
 	}
 	resp := SpansResponse{Spans: spans}
 	payload, err := json.Marshal(resp)
 	if err != nil {
+		logRequestError(h.logger, "query_spans", r, http.StatusInternalServerError, start, err, params.Service)
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}

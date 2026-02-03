@@ -2,9 +2,12 @@ package queryhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"smelldeadfish/internal/spanstore"
 )
@@ -15,11 +18,13 @@ const (
 )
 
 type TracesHandler struct {
-	store spanstore.Store
+	store  spanstore.Store
+	logger *log.Logger
 }
 
 type TraceDetailHandler struct {
-	store spanstore.Store
+	store  spanstore.Store
+	logger *log.Logger
 }
 
 type TracesResponse struct {
@@ -32,36 +37,51 @@ type TraceDetailResponse struct {
 }
 
 func NewTracesHandler(store spanstore.Store) http.Handler {
-	return &TracesHandler{store: store}
+	return NewTracesHandlerWithOptions(store, Options{})
 }
 
 func NewTraceDetailHandler(store spanstore.Store) http.Handler {
-	return &TraceDetailHandler{store: store}
+	return NewTraceDetailHandlerWithOptions(store, Options{})
+}
+
+func NewTracesHandlerWithOptions(store spanstore.Store, opts Options) http.Handler {
+	return &TracesHandler{store: store, logger: loggerFromOptions(opts)}
+}
+
+func NewTraceDetailHandlerWithOptions(store spanstore.Store, opts Options) http.Handler {
+	return &TraceDetailHandler{store: store, logger: loggerFromOptions(opts)}
 }
 
 func (h *TracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
 	if r.URL.Path != tracesPath {
+		logRequestError(h.logger, "query_traces", r, http.StatusNotFound, start, errors.New("not found"), service)
 		http.NotFound(w, r)
 		return
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
+		logRequestError(h.logger, "query_traces", r, http.StatusMethodNotAllowed, start, errors.New("method not allowed"), service)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	params, err := parseTraceQueryParams(r)
 	if err != nil {
+		logRequestError(h.logger, "query_traces", r, http.StatusBadRequest, start, err, service)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	traces, err := h.store.QueryTraces(r.Context(), params)
 	if err != nil {
+		logRequestError(h.logger, "query_traces", r, http.StatusInternalServerError, start, err, params.Service)
 		http.Error(w, "failed to query traces", http.StatusInternalServerError)
 		return
 	}
 	resp := TracesResponse{Traces: traces}
 	payload, err := json.Marshal(resp)
 	if err != nil {
+		logRequestError(h.logger, "query_traces", r, http.StatusInternalServerError, start, err, params.Service)
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -71,30 +91,36 @@ func (h *TracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TraceDetailHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
 	if !strings.HasPrefix(r.URL.Path, traceDetailPrefix) {
+		logRequestError(h.logger, "trace_detail", r, http.StatusNotFound, start, errors.New("not found"), service)
 		http.NotFound(w, r)
 		return
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
+		logRequestError(h.logger, "trace_detail", r, http.StatusMethodNotAllowed, start, errors.New("method not allowed"), service)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	traceID := strings.TrimPrefix(r.URL.Path, traceDetailPrefix)
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" || strings.Contains(traceID, "/") {
+		logRequestError(h.logger, "trace_detail", r, http.StatusBadRequest, start, errors.New("trace_id is required"), service)
 		http.Error(w, "trace_id is required", http.StatusBadRequest)
 		return
 	}
-	service := strings.TrimSpace(r.URL.Query().Get("service"))
 	spans, err := h.store.QueryTraceSpans(r.Context(), traceID, service)
 	if err != nil {
+		logRequestError(h.logger, "trace_detail", r, http.StatusInternalServerError, start, err, service)
 		http.Error(w, "failed to query trace", http.StatusInternalServerError)
 		return
 	}
 	resp := TraceDetailResponse{TraceID: traceID, Spans: spans}
 	payload, err := json.Marshal(resp)
 	if err != nil {
+		logRequestError(h.logger, "trace_detail", r, http.StatusInternalServerError, start, err, service)
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}

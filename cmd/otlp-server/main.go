@@ -25,6 +25,7 @@ func main() {
 	var spanQueryHandler http.Handler
 	var tracesQueryHandler http.Handler
 	var traceDetailHandler http.Handler
+	logger := log.Default()
 	switch strings.ToLower(strings.TrimSpace(*sinkKind)) {
 	case "stdout":
 		sink = ingest.NewStdoutSink(os.Stdout)
@@ -42,14 +43,15 @@ func main() {
 			}
 		}()
 		sink = sqliteSink
-		spanQueryHandler = queryhttp.NewHandler(sqliteSink)
-		tracesQueryHandler = queryhttp.NewTracesHandler(sqliteSink)
-		traceDetailHandler = queryhttp.NewTraceDetailHandler(sqliteSink)
+		queryOpts := queryhttp.Options{Logger: logger}
+		spanQueryHandler = queryhttp.NewHandlerWithOptions(sqliteSink, queryOpts)
+		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(sqliteSink, queryOpts)
+		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(sqliteSink, queryOpts)
 	default:
 		log.Fatalf("unknown sink: %s", *sinkKind)
 	}
 
-	otlpHandler := otlphttp.NewHandler(sink, otlphttp.Options{})
+	otlpHandler := otlphttp.NewHandler(sink, otlphttp.Options{Logger: logger})
 	mux := http.NewServeMux()
 	mux.Handle("/v1/traces", otlpHandler)
 	if spanQueryHandler != nil {

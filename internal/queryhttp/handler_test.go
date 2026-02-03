@@ -1,10 +1,13 @@
 package queryhttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"smelldeadfish/internal/spanstore"
@@ -82,5 +85,23 @@ func TestHandlerAcceptsMissingAttrFilters(t *testing.T) {
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected %d got %d", http.StatusOK, resp.Code)
+	}
+}
+
+func TestHandlerLogsErrors(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := log.New(&buffer, "", 0)
+	h := NewHandlerWithOptions(&fakeStore{}, Options{Logger: logger})
+	req := httptest.NewRequest(http.MethodGet, spansPath, nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d got %d", http.StatusBadRequest, resp.Code)
+	}
+	logged := buffer.String()
+	if !strings.Contains(logged, "handler=query_spans") || !strings.Contains(logged, "status=400") {
+		t.Fatalf("expected log line for error, got: %s", logged)
 	}
 }

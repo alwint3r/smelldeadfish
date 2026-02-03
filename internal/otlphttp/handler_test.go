@@ -3,8 +3,10 @@ package otlphttp
 import (
 	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -69,5 +71,24 @@ func TestHandlerAcceptsValidProtobuf(t *testing.T) {
 	}
 	if !sink.called {
 		t.Fatalf("expected sink to be called")
+	}
+}
+
+func TestHandlerLogsErrors(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := log.New(&buffer, "", 0)
+	h := NewHandler(&captureSink{}, Options{Logger: logger})
+	req := httptest.NewRequest(http.MethodPost, tracesPath, bytes.NewReader([]byte("bad")))
+	req.Header.Set("Content-Type", "text/plain")
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected %d got %d", http.StatusUnsupportedMediaType, resp.Code)
+	}
+	logged := buffer.String()
+	if !strings.Contains(logged, "handler=otlp") || !strings.Contains(logged, "status=415") {
+		t.Fatalf("expected log line for error, got: %s", logged)
 	}
 }
