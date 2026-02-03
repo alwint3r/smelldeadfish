@@ -11,12 +11,14 @@ import (
 	ingestsqlite "smelldeadfish/internal/ingest/sqlite"
 	"smelldeadfish/internal/otlphttp"
 	"smelldeadfish/internal/queryhttp"
+	"smelldeadfish/internal/uiembed"
 )
 
 func main() {
 	addr := flag.String("addr", ":4318", "listen address")
 	sinkKind := flag.String("sink", "stdout", "trace sink: stdout or sqlite")
 	dbPath := flag.String("db", "./smelldeadfish.sqlite", "sqlite database path")
+	uiEnabled := flag.Bool("ui", true, "serve embedded UI (requires uiembed build tag)")
 	flag.Parse()
 
 	var sink ingest.TraceSink
@@ -54,6 +56,19 @@ func main() {
 		mux.Handle("/api/spans", spanQueryHandler)
 		mux.Handle("/api/traces", tracesQueryHandler)
 		mux.Handle("/api/traces/", traceDetailHandler)
+	}
+	if *uiEnabled {
+		if uiembed.Available() {
+			uiHandler, err := uiembed.NewHandler("/ui")
+			if err != nil {
+				log.Printf("ui handler unavailable: %v", err)
+			} else {
+				mux.Handle("/ui/", http.StripPrefix("/ui", uiHandler))
+				mux.Handle("/ui", http.StripPrefix("/ui", uiHandler))
+			}
+		} else {
+			log.Printf("ui disabled: rebuild with -tags uiembed to embed the UI")
+		}
 	}
 
 	server := &http.Server{Addr: *addr, Handler: mux}

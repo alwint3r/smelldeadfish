@@ -102,6 +102,19 @@ Outputs:
 - `dist/prod/bin/darwin_arm64/otlp-server`
 - `dist/prod/bin/windows_amd64/otlp-server.exe`
 
+To build a single binary per platform that embeds the UI:
+
+```
+task dist:embed
+```
+
+Outputs:
+
+- `dist/prod-embed/bin/darwin_arm64/otlp-server`
+- `dist/prod-embed/bin/windows_amd64/otlp-server.exe`
+
+Run the embedded UI at `http://localhost:4318/ui/` (disable with `-ui=false`).
+
 ## Tests
 
 ```

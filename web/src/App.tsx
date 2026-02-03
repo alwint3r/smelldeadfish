@@ -1,6 +1,7 @@
 import Router from "preact-router";
 import { SearchPage } from "./pages/SearchPage";
 import { TracePage } from "./pages/TracePage";
+import { basePath, basePathWithSlash, withBase } from "./utils/base";
 
 export function App() {
   return (
@@ -14,8 +15,9 @@ export function App() {
       </header>
       <main class="main-content">
         <Router>
-          <SearchPage path="/" />
-          <TracePage path="/trace/:traceId" />
+          <SearchPage path={basePathWithSlash} />
+          {basePath !== "" ? <SearchPage path={basePath} /> : null}
+          <TracePage path={withBase("/trace/:traceId")} />
         </Router>
       </main>
     </div>

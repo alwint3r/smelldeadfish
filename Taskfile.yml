@@ -3,6 +3,8 @@ version: '3'
 vars:
   DIST_DIR: dist
   BIN_DIR: '{{.DIST_DIR}}/bin'
+  DIST_EMBED_DIR: dist/prod-embed
+  EMBED_BIN_DIR: '{{.DIST_EMBED_DIR}}/bin'
   MAC_OS: darwin
   MAC_ARCH: arm64
   WIN_OS: windows
@@ -20,6 +22,14 @@ tasks:
     cmds:
       - mkdir -p {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}
       - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/otlp-server{{.EXT}} ./cmd/otlp-server
+
+  _build_embed:
+    internal: true
+    vars:
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
+    cmds:
+      - mkdir -p {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}
+      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/otlp-server{{.EXT}} ./cmd/otlp-server
 
   build:server:windows:
     desc: Build otlp-server for Windows (amd64)
@@ -49,6 +59,22 @@ tasks:
     desc: Build otlp-server for all platforms
     deps: [build:windows, build:darwin]
 
+  build:embed:windows:
+    desc: Build embedded-ui otlp-server for Windows (amd64)
+    cmds: [{task: _build_embed, vars: {OS: '{{.WIN_OS}}', ARCH: '{{.WIN_ARCH}}'}}]
+
+  build:embed:darwin:
+    desc: Build embedded-ui otlp-server for macOS (arm64)
+    cmds: [{task: _build_embed, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
+
+  build:embed:
+    desc: Build embedded-ui otlp-server for local dev (macOS)
+    deps: [build:embed:darwin]
+
+  build:embed:all:
+    desc: Build embedded-ui otlp-server for all platforms
+    deps: [build:embed:windows, build:embed:darwin]
+
   web:install:
     desc: Install web dependencies
     dir: web
@@ -62,6 +88,15 @@ tasks:
     cmds:
       - npm run build
 
+  web:build:embed:
+    desc: Build web UI for embedding at /ui/
+    dir: web
+    deps: [web:install]
+    env:
+      VITE_BASE: /ui/
+    cmds:
+      - npm run build
+
   dist:bundle:
     desc: Build server binaries and bundle with web UI
     deps: [build:all, web:build]
@@ -72,3 +107,12 @@ tasks:
       - cp -r web/dist/* {{.DIST_DIR}}/prod/web/
       - cp {{.BIN_DIR}}/{{.MAC_OS}}_{{.MAC_ARCH}}/otlp-server {{.DIST_DIR}}/prod/bin/{{.MAC_OS}}_{{.MAC_ARCH}}/
       - cp {{.BIN_DIR}}/{{.WIN_OS}}_{{.WIN_ARCH}}/otlp-server.exe {{.DIST_DIR}}/prod/bin/{{.WIN_OS}}_{{.WIN_ARCH}}/
+
+  dist:embed:
+    desc: Build embedded-ui server binaries
+    deps: [web:build:embed]
+    cmds:
+      - rm -rf internal/uiembed/dist
+      - mkdir -p internal/uiembed/dist
+      - cp -r web/dist/* internal/uiembed/dist/
+      - task: build:embed:all

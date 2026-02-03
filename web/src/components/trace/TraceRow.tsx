@@ -1,6 +1,7 @@
 import type { TraceSummary } from "../../types";
 import { formatDuration, formatTimestamp, formatCount } from "../../utils/format";
 import { RouterLink } from "../common/RouterLink";
+import { withBase } from "../../utils/base";
 
 export function TraceRow({ trace, searchSuffix }: { trace: TraceSummary; searchSuffix: string }) {
   const hasErrors = trace.error_count > 0;
@@ -8,7 +9,7 @@ export function TraceRow({ trace, searchSuffix }: { trace: TraceSummary; searchS
   return (
     <RouterLink
       class={`trace-row ${hasErrors ? "trace-row--error" : ""}`}
-      href={`/trace/${trace.trace_id}${searchSuffix}`}
+      href={withBase(`/trace/${trace.trace_id}${searchSuffix}`)}
     >
       <div class="trace-main">
         <div class="trace-name">{trace.root_name || "(unknown root)"}</div>

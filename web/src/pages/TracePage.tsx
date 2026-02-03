@@ -1,6 +1,7 @@
 import type { RoutableProps } from "preact-router";
 import { TraceDetail } from "../components/trace/TraceDetail";
 import { RouterLink } from "../components/common/RouterLink";
+import { withBase } from "../utils/base";
 
 type TracePageProps = RoutableProps & {
   traceId?: string;
@@ -8,7 +9,7 @@ type TracePageProps = RoutableProps & {
 
 export function TracePage({ traceId }: TracePageProps) {
   const search = window.location.search;
-  const backHref = search ? `/${search}` : "/";
+  const backHref = search ? withBase(`/${search}`) : withBase("/");
 
   return (
     <div class="trace-page">
