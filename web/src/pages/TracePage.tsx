@@ -1,18 +1,21 @@
-import type { RouteComponentProps } from "preact-router";
-import { Link } from "preact-router/match";
+import type { RoutableProps } from "preact-router";
 import { TraceDetail } from "../components/trace/TraceDetail";
+import { RouterLink } from "../components/common/RouterLink";
 
-export function TracePage(props: RouteComponentProps<{ traceId: string }>) {
-  const traceId = props.traceId;
+type TracePageProps = RoutableProps & {
+  traceId?: string;
+};
+
+export function TracePage({ traceId }: TracePageProps) {
   const search = window.location.search;
   const backHref = search ? `/${search}` : "/";
 
   return (
     <div class="trace-page">
       <div class="trace-page-header">
-        <Link class="ghost-button" href={backHref}>
+        <RouterLink class="ghost-button" href={backHref}>
           Back to search
-        </Link>
+        </RouterLink>
         <div class="muted">Trace details</div>
       </div>
       {traceId ? (

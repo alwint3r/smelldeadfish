@@ -1,3 +1,4 @@
+import type { JSX } from "preact";
 import type { Span } from "../../types";
 import { formatDuration, formatTimestamp } from "../../utils/format";
 import { KeyValueTable } from "../common/KeyValueTable";

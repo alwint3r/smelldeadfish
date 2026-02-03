@@ -1,0 +1,74 @@
+version: '3'
+
+vars:
+  DIST_DIR: dist
+  BIN_DIR: '{{.DIST_DIR}}/bin'
+  MAC_OS: darwin
+  MAC_ARCH: arm64
+  WIN_OS: windows
+  WIN_ARCH: amd64
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  _build:
+    internal: true
+    vars:
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}
+      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/otlp-server{{.EXT}} ./cmd/otlp-server
+
+  build:server:windows:
+    desc: Build otlp-server for Windows (amd64)
+    cmds: [{task: _build, vars: {OS: '{{.WIN_OS}}', ARCH: '{{.WIN_ARCH}}'}}]
+
+  build:server:darwin:
+    desc: Build otlp-server for macOS (arm64)
+    cmds: [{task: _build, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
+
+  build:server:
+    desc: Build otlp-server for local dev (macOS)
+    deps: [build:server:darwin]
+
+  build:windows:
+    desc: Build otlp-server for Windows (amd64)
+    deps: [build:server:windows]
+
+  build:darwin:
+    desc: Build otlp-server for macOS (arm64)
+    deps: [build:server:darwin]
+
+  build:
+    desc: Build otlp-server for local dev (macOS)
+    deps: [build:darwin]
+
+  build:all:
+    desc: Build otlp-server for all platforms
+    deps: [build:windows, build:darwin]
+
+  web:install:
+    desc: Install web dependencies
+    dir: web
+    cmds:
+      - npm ci
+
+  web:build:
+    desc: Build web UI
+    dir: web
+    deps: [web:install]
+    cmds:
+      - npm run build
+
+  dist:bundle:
+    desc: Build server binaries and bundle with web UI
+    deps: [build:all, web:build]
+    cmds:
+      - mkdir -p {{.DIST_DIR}}/prod/web
+      - mkdir -p {{.DIST_DIR}}/prod/bin/{{.MAC_OS}}_{{.MAC_ARCH}}
+      - mkdir -p {{.DIST_DIR}}/prod/bin/{{.WIN_OS}}_{{.WIN_ARCH}}
+      - cp -r web/dist/* {{.DIST_DIR}}/prod/web/
+      - cp {{.BIN_DIR}}/{{.MAC_OS}}_{{.MAC_ARCH}}/otlp-server {{.DIST_DIR}}/prod/bin/{{.MAC_OS}}_{{.MAC_ARCH}}/
+      - cp {{.BIN_DIR}}/{{.WIN_OS}}_{{.WIN_ARCH}}/otlp-server.exe {{.DIST_DIR}}/prod/bin/{{.WIN_OS}}_{{.WIN_ARCH}}/

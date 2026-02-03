@@ -77,6 +77,31 @@ npm run dev
 
 Visit `http://localhost:5173` while the Go server is running on `:4318`.
 
+## Builds
+
+This repo includes a `Taskfile.yml` for cross-platform builds. From the repository root:
+
+```
+task build:all
+```
+
+Outputs:
+
+- `dist/bin/darwin_arm64/otlp-server`
+- `dist/bin/windows_amd64/otlp-server.exe`
+
+To bundle the server binaries with the web UI:
+
+```
+task dist:bundle
+```
+
+Outputs:
+
+- `dist/prod/web/` (Vite build output)
+- `dist/prod/bin/darwin_arm64/otlp-server`
+- `dist/prod/bin/windows_amd64/otlp-server.exe`
+
 ## Tests
 
 ```

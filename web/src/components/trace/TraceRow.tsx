@@ -1,12 +1,12 @@
-import { Link } from "preact-router/match";
 import type { TraceSummary } from "../../types";
 import { formatDuration, formatTimestamp, formatCount } from "../../utils/format";
+import { RouterLink } from "../common/RouterLink";
 
 export function TraceRow({ trace, searchSuffix }: { trace: TraceSummary; searchSuffix: string }) {
   const hasErrors = trace.error_count > 0;
 
   return (
-    <Link
+    <RouterLink
       class={`trace-row ${hasErrors ? "trace-row--error" : ""}`}
       href={`/trace/${trace.trace_id}${searchSuffix}`}
     >
@@ -39,6 +39,6 @@ export function TraceRow({ trace, searchSuffix }: { trace: TraceSummary; searchS
           <span class="stat-value">{formatTimestamp(trace.start_time_unix_nano)}</span>
         </div>
       </div>
-    </Link>
+    </RouterLink>
   );
 }

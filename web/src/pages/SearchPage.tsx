@@ -6,6 +6,7 @@ import { TraceList } from "../components/trace/TraceList";
 import { TraceSummaryBar } from "../components/trace/TraceSummaryBar";
 import { useTraces } from "../hooks/useTraces";
 import type { AttrFilter, TraceOrder, TraceQuery } from "../types";
+import type { RoutableProps } from "preact-router";
 
 const DEFAULT_LIMIT = 100;
 const LIMIT_STEP = 100;
@@ -107,7 +108,10 @@ function buildSearchParams(state: UrlSearchState): string {
   return params.toString();
 }
 
-export function SearchPage() {
+type SearchPageProps = RoutableProps;
+
+export function SearchPage(props: SearchPageProps) {
+  void props;
   const [service, setService] = useState("");
   const [serviceError, setServiceError] = useState<string | undefined>(undefined);
   const [filters, setFilters] = useState<AttrFilter[]>([]);
