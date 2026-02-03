@@ -10,6 +10,8 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"smelldeadfish/internal/spanstore"
 )
 
 func TestSQLiteSinkPersistsSpan(t *testing.T) {
@@ -120,5 +122,72 @@ func TestSQLiteSinkInitializesSchema(t *testing.T) {
 	var name string
 	if err := row.Scan(&name); err != nil {
 		t.Fatalf("expected spans table: %v", err)
+	}
+}
+
+func TestSQLiteSinkQueryTracesOrdersWithoutAmbiguity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.sqlite")
+
+	sink, err := New(path)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Fatalf("close sink: %v", err)
+		}
+	}()
+
+	start := uint64(time.Now().Add(-20 * time.Millisecond).UnixNano())
+	end := uint64(time.Now().UnixNano())
+	req := &coltracepb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "trace-list-service"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Scope: &commonpb.InstrumentationScope{Name: "scope", Version: "v1"},
+						Spans: []*tracepb.Span{
+							{
+								TraceId:           []byte{0x02, 0x03},
+								SpanId:            []byte{0x0c, 0x0d},
+								ParentSpanId:      []byte{},
+								Name:              "root",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := sink.Consume(context.Background(), req); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	ctx := context.Background()
+	summaries, err := sink.QueryTraces(ctx, spanstore.TraceQueryParams{
+		Service: "trace-list-service",
+		Start:   int64(start) - int64(time.Millisecond),
+		End:     int64(end) + int64(time.Millisecond),
+		Limit:   10,
+		Order:   spanstore.TraceOrderDurationDesc,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+	if len(summaries) == 0 {
+		t.Fatalf("expected at least one trace summary")
+	}
+	if summaries[0].TraceID == "" {
+		t.Fatalf("expected trace_id to be populated")
 	}
 }

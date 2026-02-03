@@ -9,8 +9,10 @@ import (
 	"smelldeadfish/internal/spanstore"
 )
 
-const tracesPath = "/api/traces"
-const traceDetailPrefix = "/api/traces/"
+const (
+	tracesPath        = "/api/traces"
+	traceDetailPrefix = "/api/traces/"
+)
 
 type TracesHandler struct {
 	store spanstore.Store

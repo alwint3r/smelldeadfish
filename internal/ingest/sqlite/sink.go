@@ -326,13 +326,13 @@ GROUP BY s.trace_id
 func traceSummaryOrderClause(order spanstore.TraceOrder) string {
 	switch order {
 	case spanstore.TraceOrderStartAsc:
-		return ` ORDER BY start_time_unix_nano ASC, trace_id DESC`
+		return ` ORDER BY start_time_unix_nano ASC, s.trace_id DESC`
 	case spanstore.TraceOrderDurationDesc:
-		return ` ORDER BY duration_unix_nano DESC, start_time_unix_nano DESC, trace_id DESC`
+		return ` ORDER BY duration_unix_nano DESC, start_time_unix_nano DESC, s.trace_id DESC`
 	case spanstore.TraceOrderDurationAsc:
-		return ` ORDER BY duration_unix_nano ASC, start_time_unix_nano DESC, trace_id DESC`
+		return ` ORDER BY duration_unix_nano ASC, start_time_unix_nano DESC, s.trace_id DESC`
 	default:
-		return ` ORDER BY start_time_unix_nano DESC, trace_id DESC`
+		return ` ORDER BY start_time_unix_nano DESC, s.trace_id DESC`
 	}
 }
 

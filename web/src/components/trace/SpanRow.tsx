@@ -5,13 +5,17 @@ export function SpanRow({
   node,
   selected,
   onSelect,
+  traceDuration,
 }: {
   node: SpanNode;
   selected: boolean;
   onSelect: (spanId: string) => void;
+  traceDuration: number;
 }) {
   const span = node.span;
   const hasError = span.status_code === 2;
+  const spanDuration = Math.max(0, span.end_time_unix_nano - span.start_time_unix_nano);
+  const widthPercent = traceDuration > 0 ? Math.min(100, (spanDuration / traceDuration) * 100) : 0;
 
   return (
     <div
@@ -28,6 +32,15 @@ export function SpanRow({
     >
       <div class="span-row-main">
         <span class={`span-name ${hasError ? "span-name--error" : ""}`}>{span.name}</span>
+        <div class="span-duration-bar">
+          <div
+            class="span-duration-fill"
+            style={{
+              width: `${widthPercent}%`,
+              minWidth: spanDuration > 0 ? "2px" : "0",
+            }}
+          />
+        </div>
         <span class="span-kind">{span.kind}</span>
       </div>
       <div class="span-row-meta">
