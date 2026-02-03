@@ -1,4 +1,4 @@
-# Smelldeadfish OTLP HTTP Receiver
+# SmellDeadFish OTLP HTTP Receiver
 
 This project provides a minimal Go service that receives OpenTelemetry Protocol (OTLP) traces over HTTP. There are two executables:
 
@@ -119,4 +119,28 @@ Run the embedded UI at `http://localhost:4318/ui/` (disable with `-ui=false`).
 
 ```
 go test ./...
+```
+
+## Release
+
+Release artifacts are staged locally with the embedded UI build pipeline. The release script does not run `git` or `gh`; it only builds and stages assets and prints manual commands to publish.
+
+From the repository root:
+
+```
+task release VERSION=v0.1.0
+```
+
+This stages release assets named:
+
+- `smelldeadfish-otlp-server_darwin_arm64`
+- `smelldeadfish-otlp-server_windows_amd64.exe`
+- `checksums.txt`
+
+The script prints the `gh` commands you can run manually to create and upload the GitHub Release.
+
+
+```
+2026/02/03 15:28:03 msg=request_error handler=query_traces method=GET path=/api/traces status=500 duration_ms=0 error="query traces: database i
+s locked (5) (SQLITE_BUSY)" service="lrs-collector"
 ```

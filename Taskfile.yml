@@ -9,6 +9,7 @@ vars:
   MAC_ARCH: arm64
   WIN_OS: windows
   WIN_ARCH: amd64
+  OTLP_SERVER_BIN_NAME: smelldeadfish-otlp-server
 
 tasks:
   default:
@@ -21,7 +22,7 @@ tasks:
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
       - mkdir -p {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}
-      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/otlp-server{{.EXT}} ./cmd/otlp-server
+      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
 
   _build_embed:
     internal: true
@@ -29,7 +30,7 @@ tasks:
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
       - mkdir -p {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}
-      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/otlp-server{{.EXT}} ./cmd/otlp-server
+      - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
 
   build:server:windows:
     desc: Build otlp-server for Windows (amd64)
@@ -116,3 +117,11 @@ tasks:
       - mkdir -p internal/uiembed/dist
       - cp -r web/dist/* internal/uiembed/dist/
       - task: build:embed:all
+
+  release:
+    desc: Stage release artifacts (requires VERSION=vX.Y.Z)
+    preconditions:
+      - sh: test -n "{{.VERSION}}"
+        msg: "VERSION is required (e.g., task release VERSION=v0.1.0)"
+    cmds:
+      - bash scripts/release.sh --version {{.VERSION}}
