@@ -6,11 +6,17 @@ export function SpanRow({
   selected,
   onSelect,
   traceDuration,
+  hasChildren,
+  expanded,
+  onToggleExpand,
 }: {
   node: SpanNode;
   selected: boolean;
   onSelect: (spanId: string) => void;
   traceDuration: number;
+  hasChildren: boolean;
+  expanded: boolean;
+  onToggleExpand: (spanId: string) => void;
 }) {
   const span = node.span;
   const hasError = span.status_code === 2;
@@ -30,6 +36,21 @@ export function SpanRow({
         }
       }}
     >
+      <div class="span-row-toggle">
+        {hasChildren ? (
+          <button
+            class={`span-toggle ${expanded ? "span-toggle--expanded" : ""}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleExpand(span.span_id);
+            }}
+            aria-label={expanded ? "Collapse span" : "Expand span"}
+          >
+            <span class="span-toggle-icon" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
       <div class="span-row-main">
         <span class={`span-name ${hasError ? "span-name--error" : ""}`}>{span.name}</span>
         <div class="span-duration-bar">

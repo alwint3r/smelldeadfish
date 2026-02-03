@@ -378,6 +378,49 @@
   transition: background 0.2s ease, border 0.2s ease;
 }
 
+.span-row-toggle {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.span-toggle {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.span-toggle:hover {
+  border-color: var(--border);
+  background: var(--panel-muted);
+}
+
+.span-toggle-icon {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--muted);
+  display: inline-block;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.span-toggle--expanded .span-toggle-icon {
+  transform: rotate(90deg);
+}
+
 .span-row:hover {
   background: var(--panel-muted);
 }
