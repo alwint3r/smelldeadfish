@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	ingestsqlite "smelldeadfish/internal/ingest/sqlite"
 	"smelldeadfish/internal/otlphttp"
 	"smelldeadfish/internal/queryhttp"
+	"smelldeadfish/internal/spanstore"
 	"smelldeadfish/internal/uiembed"
 )
 
@@ -24,44 +26,19 @@ func main() {
 	flag.Parse()
 
 	var sink ingest.TraceSink
-	var spanQueryHandler http.Handler
-	var tracesQueryHandler http.Handler
-	var traceDetailHandler http.Handler
+	var handlers queryHandlers
 	logger := log.Default()
 	switch strings.ToLower(strings.TrimSpace(*sinkKind)) {
 	case "stdout":
 		sink = ingest.NewStdoutSink(os.Stdout)
-	case "sqlite":
-		if strings.TrimSpace(*dbPath) == "" {
-			log.Fatal("db path is required for sqlite sink")
-		}
-		sqliteSink, err := ingestsqlite.New(*dbPath)
-		if err != nil {
-			log.Fatalf("open sqlite: %v", err)
-		}
-		sink = ingest.NewQueueSink(sqliteSink, ingest.QueueOptions{Size: *queueSize, Logger: logger})
-		queryOpts := queryhttp.Options{Logger: logger}
-		spanQueryHandler = queryhttp.NewHandlerWithOptions(sqliteSink, queryOpts)
-		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(sqliteSink, queryOpts)
-		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(sqliteSink, queryOpts)
-	case "duckdb":
-		if strings.TrimSpace(*dbPath) == "" {
-			log.Fatal("db path is required for duckdb sink")
-		}
-		if !ingestduckdb.Available() {
-			log.Fatal("duckdb support unavailable: rebuild with -tags duckdb and CGO_ENABLED=1")
-		}
-		duckdbSink, err := ingestduckdb.New(*dbPath)
-		if err != nil {
-			log.Fatalf("open duckdb: %v", err)
-		}
-		sink = ingest.NewQueueSink(duckdbSink, ingest.QueueOptions{Size: *queueSize, Logger: logger})
-		queryOpts := queryhttp.Options{Logger: logger}
-		spanQueryHandler = queryhttp.NewHandlerWithOptions(duckdbSink, queryOpts)
-		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(duckdbSink, queryOpts)
-		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(duckdbSink, queryOpts)
 	default:
-		log.Fatalf("unknown sink: %s", *sinkKind)
+		var err error
+		normalized := strings.TrimSpace(*sinkKind)
+		normalized = strings.ToLower(normalized)
+		sink, handlers, err = setupDBSink(normalized, *dbPath, *queueSize, logger)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	if closer, ok := sink.(interface{ Close() error }); ok {
@@ -75,10 +52,10 @@ func main() {
 	otlpHandler := otlphttp.NewHandler(sink, otlphttp.Options{Logger: logger})
 	mux := http.NewServeMux()
 	mux.Handle("/v1/traces", otlpHandler)
-	if spanQueryHandler != nil {
-		mux.Handle("/api/spans", spanQueryHandler)
-		mux.Handle("/api/traces", tracesQueryHandler)
-		mux.Handle("/api/traces/", traceDetailHandler)
+	if handlers.spans != nil {
+		mux.Handle("/api/spans", handlers.spans)
+		mux.Handle("/api/traces", handlers.traces)
+		mux.Handle("/api/traces/", handlers.traceDetail)
 	}
 	if *uiEnabled {
 		if uiembed.Available() {
@@ -86,8 +63,9 @@ func main() {
 			if err != nil {
 				log.Printf("ui handler unavailable: %v", err)
 			} else {
-				mux.Handle("/ui/", http.StripPrefix("/ui", uiHandler))
-				mux.Handle("/ui", http.StripPrefix("/ui", uiHandler))
+				for _, path := range []string{"/ui/", "/ui"} {
+					mux.Handle(path, http.StripPrefix("/ui", uiHandler))
+				}
 			}
 		} else {
 			log.Printf("ui disabled: rebuild with -tags uiembed to embed the UI")
@@ -98,5 +76,48 @@ func main() {
 	log.Printf("OTLP HTTP receiver listening on %s", *addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
+	}
+}
+
+type queryHandlers struct {
+	spans       http.Handler
+	traces      http.Handler
+	traceDetail http.Handler
+}
+
+func newQueryHandlers(store spanstore.Store, logger *log.Logger) queryHandlers {
+	opts := queryhttp.Options{Logger: logger}
+	return queryHandlers{
+		spans:       queryhttp.NewHandlerWithOptions(store, opts),
+		traces:      queryhttp.NewTracesHandlerWithOptions(store, opts),
+		traceDetail: queryhttp.NewTraceDetailHandlerWithOptions(store, opts),
+	}
+}
+
+func setupDBSink(kind, dbPath string, queueSize int, logger *log.Logger) (ingest.TraceSink, queryHandlers, error) {
+	if strings.TrimSpace(dbPath) == "" {
+		return nil, queryHandlers{}, fmt.Errorf("db path is required for %s sink", kind)
+	}
+
+	switch kind {
+	case "sqlite":
+		sqliteSink, err := ingestsqlite.New(dbPath)
+		if err != nil {
+			return nil, queryHandlers{}, fmt.Errorf("open sqlite: %w", err)
+		}
+		sink := ingest.NewQueueSink(sqliteSink, ingest.QueueOptions{Size: queueSize, Logger: logger})
+		return sink, newQueryHandlers(sqliteSink, logger), nil
+	case "duckdb":
+		if !ingestduckdb.Available() {
+			return nil, queryHandlers{}, fmt.Errorf("duckdb support unavailable: rebuild with -tags duckdb and CGO_ENABLED=1")
+		}
+		duckdbSink, err := ingestduckdb.New(dbPath)
+		if err != nil {
+			return nil, queryHandlers{}, fmt.Errorf("open duckdb: %w", err)
+		}
+		sink := ingest.NewQueueSink(duckdbSink, ingest.QueueOptions{Size: queueSize, Logger: logger})
+		return sink, newQueryHandlers(duckdbSink, logger), nil
+	default:
+		return nil, queryHandlers{}, fmt.Errorf("unknown sink: %s", kind)
 	}
 }
