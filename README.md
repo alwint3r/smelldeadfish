@@ -140,9 +140,3 @@ This stages release assets named:
 - `checksums.txt`
 
 The script prints the `gh` commands you can run manually to create and upload the GitHub Release.
-
-
-```
-2026/02/03 15:28:03 msg=request_error handler=query_traces method=GET path=/api/traces status=500 duration_ms=0 error="query traces: database i
-s locked (5) (SQLITE_BUSY)" service="lrs-collector"
-```
