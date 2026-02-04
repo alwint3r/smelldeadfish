@@ -224,3 +224,5 @@ temp/
 !.agent/PLANS.md
 
 *.sqlite*
+*.duckdb
+*.duckdb.*

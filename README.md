@@ -21,13 +21,19 @@ go run ./cmd/otlp-stdout -addr :14318
 
 ## Run the configurable server
 
-The configurable server supports `-sink stdout` or `-sink sqlite` and an optional SQLite database path:
+The configurable server supports `-sink stdout`, `-sink sqlite`, or `-sink duckdb` with an optional database path:
 
 ```
 go run ./cmd/otlp-server -sink sqlite -db ./smelldeadfish.sqlite
 ```
 
-When using the SQLite sink, ingestion is buffered by an in-memory queue to smooth bursts. Use `-queue-size` to set the maximum queued requests (default 10000); when full, OTLP requests will block until space is available. The SQLite store runs in WAL mode with `synchronous=NORMAL` and retries transient busy locks for a short period so read queries can continue during writes.
+DuckDB support requires CGO and the `duckdb` build tag:
+
+```
+CGO_ENABLED=1 go run -tags duckdb ./cmd/otlp-server -sink duckdb -db ./smelldeadfish.duckdb
+```
+
+When using the SQLite or DuckDB sink, ingestion is buffered by an in-memory queue to smooth bursts. Use `-queue-size` to set the maximum queued requests (default 10000); when full, OTLP requests will block until space is available. The SQLite store runs in WAL mode with `synchronous=NORMAL` and retries transient busy locks for a short period so read queries can continue during writes.
 
 ## Send a sample trace
 
@@ -45,7 +51,7 @@ span service=smelldeadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_i
 
 ## Query stored spans
 
-The query endpoint is only available when using the SQLite sink (`-sink sqlite`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
+The query endpoint is only available when using the SQLite or DuckDB sink (`-sink sqlite` or `-sink duckdb`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
 
 ```
 curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&attr=http.method=GET"
@@ -53,7 +59,7 @@ curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=999
 
 ## Query trace summaries
 
-Trace summaries are only available when using the SQLite sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Use the `order` parameter to sort (`start_desc`, `start_asc`, `duration_desc`, `duration_asc`); results default to newest first and a limit of 100.
+Trace summaries are only available when using the SQLite or DuckDB sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Use the `order` parameter to sort (`start_desc`, `start_asc`, `duration_desc`, `duration_asc`); results default to newest first and a limit of 100.
 
 ```
 curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&order=duration_desc"
@@ -85,6 +91,18 @@ This repo includes a `Taskfile.yml` for cross-platform builds. From the reposito
 
 ```
 task build:all
+```
+
+CGO-enabled DuckDB builds require CGO and the `duckdb` build tag. For local macOS builds:
+
+```
+task build:cgo
+```
+
+For embedded UI builds with DuckDB:
+
+```
+task build:cgo:embed
 ```
 
 Outputs:

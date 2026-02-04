@@ -32,6 +32,22 @@ tasks:
       - mkdir -p {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}
       - CGO_ENABLED=0 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
 
+  _build_cgo:
+    internal: true
+    vars:
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
+    cmds:
+      - mkdir -p {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}
+      - CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags duckdb -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
+
+  _build_embed_cgo:
+    internal: true
+    vars:
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
+    cmds:
+      - mkdir -p {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}
+      - CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags "duckdb uiembed" -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
+
   build:server:windows:
     desc: Build otlp-server for Windows (amd64)
     cmds: [{task: _build, vars: {OS: '{{.WIN_OS}}', ARCH: '{{.WIN_ARCH}}'}}]
@@ -68,13 +84,29 @@ tasks:
     desc: Build embedded-ui otlp-server for macOS (arm64)
     cmds: [{task: _build_embed, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
 
+  build:cgo:darwin:
+    desc: Build CGO-enabled otlp-server for macOS (arm64)
+    cmds: [{task: _build_cgo, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
+
   build:embed:
     desc: Build embedded-ui otlp-server for local dev (macOS)
     deps: [build:embed:darwin]
 
+  build:cgo:
+    desc: Build CGO-enabled otlp-server for local dev (macOS)
+    deps: [build:cgo:darwin]
+
   build:embed:all:
     desc: Build embedded-ui otlp-server for all platforms
     deps: [build:embed:windows, build:embed:darwin]
+
+  build:cgo:embed:darwin:
+    desc: Build embedded-ui CGO-enabled otlp-server for macOS (arm64)
+    cmds: [{task: _build_embed_cgo, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
+
+  build:cgo:embed:
+    desc: Build embedded-ui CGO-enabled otlp-server for local dev (macOS)
+    deps: [build:cgo:embed:darwin]
 
   web:install:
     desc: Install web dependencies

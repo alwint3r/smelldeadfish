@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"smelldeadfish/internal/ingest"
+	ingestduckdb "smelldeadfish/internal/ingest/duckdb"
 	ingestsqlite "smelldeadfish/internal/ingest/sqlite"
 	"smelldeadfish/internal/otlphttp"
 	"smelldeadfish/internal/queryhttp"
@@ -16,9 +17,9 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":4318", "listen address")
-	sinkKind := flag.String("sink", "stdout", "trace sink: stdout or sqlite")
-	dbPath := flag.String("db", "./smelldeadfish.sqlite", "sqlite database path")
-	queueSize := flag.Int("queue-size", 10000, "max queued trace requests for sqlite sink before backpressure")
+	sinkKind := flag.String("sink", "stdout", "trace sink: stdout, sqlite, or duckdb")
+	dbPath := flag.String("db", "./smelldeadfish.sqlite", "sqlite or duckdb database path")
+	queueSize := flag.Int("queue-size", 10000, "max queued trace requests for sqlite/duckdb sink before backpressure")
 	uiEnabled := flag.Bool("ui", true, "serve embedded UI (requires uiembed build tag)")
 	flag.Parse()
 
@@ -43,6 +44,22 @@ func main() {
 		spanQueryHandler = queryhttp.NewHandlerWithOptions(sqliteSink, queryOpts)
 		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(sqliteSink, queryOpts)
 		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(sqliteSink, queryOpts)
+	case "duckdb":
+		if strings.TrimSpace(*dbPath) == "" {
+			log.Fatal("db path is required for duckdb sink")
+		}
+		if !ingestduckdb.Available() {
+			log.Fatal("duckdb support unavailable: rebuild with -tags duckdb and CGO_ENABLED=1")
+		}
+		duckdbSink, err := ingestduckdb.New(*dbPath)
+		if err != nil {
+			log.Fatalf("open duckdb: %v", err)
+		}
+		sink = ingest.NewQueueSink(duckdbSink, ingest.QueueOptions{Size: *queueSize, Logger: logger})
+		queryOpts := queryhttp.Options{Logger: logger}
+		spanQueryHandler = queryhttp.NewHandlerWithOptions(duckdbSink, queryOpts)
+		tracesQueryHandler = queryhttp.NewTracesHandlerWithOptions(duckdbSink, queryOpts)
+		traceDetailHandler = queryhttp.NewTraceDetailHandlerWithOptions(duckdbSink, queryOpts)
 	default:
 		log.Fatalf("unknown sink: %s", *sinkKind)
 	}
