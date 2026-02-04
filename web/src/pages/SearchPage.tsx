@@ -27,6 +27,7 @@ type UrlSearchState = {
   endMs: number;
   limit: number;
   order: TraceOrder;
+  attrFilters: AttrFilter[];
 };
 
 function getDefaultRange(): { startMs: number; endMs: number } {
@@ -67,6 +68,31 @@ function parseOrderParam(params: URLSearchParams): TraceOrder {
   }
 }
 
+function parseAttrFilters(params: URLSearchParams): AttrFilter[] {
+  const rawFilters = params.getAll("attr");
+  if (rawFilters.length === 0) {
+    return [];
+  }
+  return rawFilters
+    .map((filter, index) => {
+      const trimmed = filter.trim();
+      if (!trimmed) {
+        return null;
+      }
+      const separator = trimmed.indexOf("=");
+      if (separator <= 0) {
+        return null;
+      }
+      const key = trimmed.slice(0, separator).trim();
+      const value = trimmed.slice(separator + 1).trim();
+      if (!key || !value) {
+        return null;
+      }
+      return { id: `attr-filter-url-${index}`, key, value };
+    })
+    .filter((filter): filter is AttrFilter => filter !== null);
+}
+
 function parseSearchState(search: string): UrlSearchState {
   const params = new URLSearchParams(search);
   const defaults = getDefaultRange();
@@ -91,7 +117,7 @@ function parseSearchState(search: string): UrlSearchState {
     limit = DEFAULT_LIMIT;
   }
 
-  return { service, startMs, endMs, limit, order };
+  return { service, startMs, endMs, limit, order, attrFilters: parseAttrFilters(params) };
 }
 
 function buildSearchParams(state: UrlSearchState): string {
@@ -105,6 +131,11 @@ function buildSearchParams(state: UrlSearchState): string {
   params.set("endMs", String(Math.trunc(state.endMs)));
   params.set("limit", String(Math.trunc(state.limit)));
   params.set("order", state.order);
+  for (const filter of state.attrFilters) {
+    if (filter.key.trim() && filter.value.trim()) {
+      params.append("attr", `${filter.key}=${filter.value}`);
+    }
+  }
   return params.toString();
 }
 
@@ -134,7 +165,7 @@ export function SearchPage(props: SearchPageProps) {
     setRange({ startMs: parsed.startMs, endMs: parsed.endMs });
     setLimit(parsed.limit);
     setOrder(parsed.order);
-    setFilters([]);
+    setFilters(parsed.attrFilters);
     setServiceError(undefined);
 
     if (!parsed.service) {
@@ -148,7 +179,7 @@ export function SearchPage(props: SearchPageProps) {
       end: toNs(parsed.endMs),
       limit: parsed.limit,
       order: parsed.order,
-      attrFilters: [],
+      attrFilters: parsed.attrFilters,
     });
   };
 
@@ -195,6 +226,7 @@ export function SearchPage(props: SearchPageProps) {
       endMs: range.endMs,
       limit: nextLimit,
       order,
+      attrFilters: sanitizedFilters,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
     window.history.pushState(null, "", nextUrl);
@@ -214,6 +246,7 @@ export function SearchPage(props: SearchPageProps) {
       endMs: toMs(query.end),
       limit: nextLimit,
       order: query.order,
+      attrFilters: query.attrFilters,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
     window.history.pushState(null, "", nextUrl);
