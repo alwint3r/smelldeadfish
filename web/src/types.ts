@@ -6,6 +6,8 @@ export type AttrFilter = {
 
 export type TraceOrder = "start_desc" | "start_asc" | "duration_desc" | "duration_asc";
 
+export type StatusFilter = "all" | "unset" | "ok" | "error";
+
 export type TraceQuery = {
   service: string;
   start: number;
@@ -13,6 +15,7 @@ export type TraceQuery = {
   limit: number;
   order: TraceOrder;
   attrFilters: AttrFilter[];
+  hasError: boolean;
 };
 
 export type TraceSummary = {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { fetchTraceDetail } from "../api/traceApi";
-import type { TraceDetail } from "../types";
+import type { StatusFilter, TraceDetail } from "../types";
 
 export type TraceDetailState = {
   status: "idle" | "loading" | "success" | "error";
@@ -8,9 +8,12 @@ export type TraceDetailState = {
   error?: string;
 };
 
-export function useTraceDetail(traceId: string | undefined): TraceDetailState {
+export function useTraceDetail(
+  traceId: string | undefined,
+  status: StatusFilter = "all"
+): TraceDetailState {
   const [state, setState] = useState<TraceDetailState>({ status: "idle" });
-  const key = useMemo(() => traceId ?? "", [traceId]);
+  const key = useMemo(() => `${traceId ?? ""}:${status}`, [traceId, status]);
 
   useEffect(() => {
     if (!traceId) {
@@ -21,7 +24,7 @@ export function useTraceDetail(traceId: string | undefined): TraceDetailState {
     const controller = new AbortController();
     setState({ status: "loading" });
 
-    fetchTraceDetail(traceId, undefined, controller.signal)
+    fetchTraceDetail(traceId, undefined, status, controller.signal)
       .then((detail) => {
         setState({ status: "success", data: detail });
       })

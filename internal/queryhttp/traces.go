@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +112,17 @@ func (h *TraceDetailHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "trace_id is required", http.StatusBadRequest)
 		return
 	}
-	spans, err := h.store.QueryTraceSpans(r.Context(), traceID, service)
+	status, err := parseStatusFilter(r.URL.Query().Get("status"))
+	if err != nil {
+		logRequestError(h.logger, "trace_detail", r, http.StatusBadRequest, start, err, service)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	spans, err := h.store.QueryTraceSpans(r.Context(), spanstore.TraceSpansQueryParams{
+		TraceID:    traceID,
+		Service:    service,
+		StatusCode: status,
+	})
 	if err != nil {
 		logRequestError(h.logger, "trace_detail", r, http.StatusInternalServerError, start, err, service)
 		http.Error(w, "failed to query trace", http.StatusInternalServerError)
@@ -155,6 +166,17 @@ func parseTraceQueryParams(r *http.Request) (spanstore.TraceQueryParams, error) 
 	if err != nil {
 		return spanstore.TraceQueryParams{}, err
 	}
+	status, err := parseStatusFilter(values.Get("status"))
+	if err != nil {
+		return spanstore.TraceQueryParams{}, err
+	}
+	hasError, err := parseBoolParam(values.Get("has_error"), "has_error")
+	if err != nil {
+		return spanstore.TraceQueryParams{}, err
+	}
+	if hasError && status != nil && *status != spanstore.StatusError {
+		return spanstore.TraceQueryParams{}, fmt.Errorf("has_error cannot be combined with status=unset or status=ok")
+	}
 	order := spanstore.TraceOrderStartDesc
 	if rawOrder := strings.TrimSpace(values.Get("order")); rawOrder != "" {
 		parsed, err := parseTraceOrder(rawOrder)
@@ -170,6 +192,8 @@ func parseTraceQueryParams(r *http.Request) (spanstore.TraceQueryParams, error) 
 		Limit:       limit,
 		Order:       order,
 		AttrFilters: filters,
+		StatusCode:  status,
+		HasError:    hasError,
 	}, nil
 }
 
@@ -183,4 +207,16 @@ func parseTraceOrder(raw string) (spanstore.TraceOrder, error) {
 	default:
 		return "", fmt.Errorf("order must be start_desc, start_asc, duration_desc, or duration_asc")
 	}
+}
+
+func parseBoolParam(raw string, field string) (bool, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", field)
+	}
+	return value, nil
 }

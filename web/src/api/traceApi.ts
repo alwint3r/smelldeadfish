@@ -1,4 +1,4 @@
-import type { TraceDetail, TraceQuery, TraceSummary } from "../types";
+import type { StatusFilter, TraceDetail, TraceQuery, TraceSummary } from "../types";
 
 const API_BASE = "/api";
 
@@ -18,6 +18,9 @@ function buildTraceQueryParams(query: TraceQuery): string {
       params.append("attr", `${filter.key}=${filter.value}`);
     }
   }
+  if (query.hasError) {
+    params.set("has_error", "1");
+  }
   return params.toString();
 }
 
@@ -34,11 +37,15 @@ export async function fetchTraces(query: TraceQuery, signal?: AbortSignal): Prom
 export async function fetchTraceDetail(
   traceId: string,
   service?: string,
+  status?: StatusFilter,
   signal?: AbortSignal
 ): Promise<TraceDetail> {
   const params = new URLSearchParams();
   if (service && service.trim()) {
     params.set("service", service);
+  }
+  if (status && status !== "all") {
+    params.set("status", status);
   }
   const query = params.toString();
   const url = query ? `${API_BASE}/traces/${traceId}?${query}` : `${API_BASE}/traces/${traceId}`;

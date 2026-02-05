@@ -64,6 +64,9 @@ function isLoadMoreQuery(previous: TraceQuery | null, next: TraceQuery): boolean
   if (previous.order !== next.order) {
     return false;
   }
+  if (previous.hasError !== next.hasError) {
+    return false;
+  }
   if (previous.limit >= next.limit) {
     return false;
   }

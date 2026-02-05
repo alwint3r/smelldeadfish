@@ -51,7 +51,7 @@ span service=smelldeadfish-demo trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_i
 
 ## Query stored spans
 
-The query endpoint is only available when using the SQLite or DuckDB sink (`-sink sqlite` or `-sink duckdb`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Results are ordered by newest first and default to a limit of 100.
+The query endpoint is only available when using the SQLite or DuckDB sink (`-sink sqlite` or `-sink duckdb`). Fetch spans by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Optional `status` filters accept `unset`, `ok`, or `error`. Results are ordered by newest first and default to a limit of 100.
 
 ```
 curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&attr=http.method=GET"
@@ -59,10 +59,12 @@ curl "http://localhost:4318/api/spans?service=smelldeadfish-demo&start=0&end=999
 
 ## Query trace summaries
 
-Trace summaries are only available when using the SQLite or DuckDB sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Use the `order` parameter to sort (`start_desc`, `start_asc`, `duration_desc`, `duration_asc`); results default to newest first and a limit of 100.
+Trace summaries are only available when using the SQLite or DuckDB sink. Fetch traces by service and time range (Unix nanoseconds). Optional `attr` filters accept `key=value` and can be repeated. Optional `status` filters accept `unset`, `ok`, or `error` and match traces that contain at least one span with that status. Optional `has_error=true` filters to traces that include at least one error span within the search window; it cannot be combined with `status=ok` or `status=unset`. Use the `order` parameter to sort (`start_desc`, `start_asc`, `duration_desc`, `duration_asc`); results default to newest first and a limit of 100.
 
 ```
 curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&limit=5&order=duration_desc"
+
+curl "http://localhost:4318/api/traces?service=smelldeadfish-demo&start=0&end=9999999999999999999&has_error=true"
 ```
 
 ## Query a trace detail
@@ -71,6 +73,12 @@ Fetch all spans for a trace:
 
 ```
 curl "http://localhost:4318/api/traces/4bf92f3577b34da6a3ce929d0e0e4736"
+```
+
+Filter trace spans by status:
+
+```
+curl "http://localhost:4318/api/traces/4bf92f3577b34da6a3ce929d0e0e4736?status=error"
 ```
 
 ## Run the frontend

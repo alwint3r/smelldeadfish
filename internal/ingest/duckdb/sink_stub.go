@@ -40,6 +40,6 @@ func (s *Sink) QueryTraces(_ context.Context, _ spanstore.TraceQueryParams) ([]s
 	return nil, errUnavailable
 }
 
-func (s *Sink) QueryTraceSpans(_ context.Context, _ string, _ string) ([]spanstore.Span, error) {
+func (s *Sink) QueryTraceSpans(_ context.Context, _ spanstore.TraceSpansQueryParams) ([]spanstore.Span, error) {
 	return nil, errUnavailable
 }

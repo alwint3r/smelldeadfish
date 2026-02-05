@@ -13,7 +13,6 @@ const LIMIT_STEP = 100;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const MS_TO_NS = 1_000_000;
 const DEFAULT_ORDER: TraceOrder = "start_desc";
-
 const ORDER_OPTIONS: Array<{ value: TraceOrder; label: string }> = [
   { value: "start_desc", label: "Newest first" },
   { value: "start_asc", label: "Oldest first" },
@@ -27,6 +26,7 @@ type UrlSearchState = {
   endMs: number;
   limit: number;
   order: TraceOrder;
+  hasError: boolean;
   attrFilters: AttrFilter[];
 };
 
@@ -53,6 +53,21 @@ function parseNumberParam(params: URLSearchParams, key: string): number | null {
     return null;
   }
   return Math.trunc(value);
+}
+
+function parseBoolParam(params: URLSearchParams, key: string): boolean {
+  const raw = params.get(key);
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false") {
+    return false;
+  }
+  return false;
 }
 
 function parseOrderParam(params: URLSearchParams): TraceOrder {
@@ -102,6 +117,7 @@ function parseSearchState(search: string): UrlSearchState {
   let endMs = parseNumberParam(params, "endMs");
   let limit = parseNumberParam(params, "limit");
   const order = parseOrderParam(params);
+  const hasError = parseBoolParam(params, "has_error");
 
   if (startMs === null) {
     startMs = defaults.startMs;
@@ -117,7 +133,7 @@ function parseSearchState(search: string): UrlSearchState {
     limit = DEFAULT_LIMIT;
   }
 
-  return { service, startMs, endMs, limit, order, attrFilters: parseAttrFilters(params) };
+  return { service, startMs, endMs, limit, order, hasError, attrFilters: parseAttrFilters(params) };
 }
 
 function buildSearchParams(state: UrlSearchState): string {
@@ -131,6 +147,9 @@ function buildSearchParams(state: UrlSearchState): string {
   params.set("endMs", String(Math.trunc(state.endMs)));
   params.set("limit", String(Math.trunc(state.limit)));
   params.set("order", state.order);
+  if (state.hasError) {
+    params.set("has_error", "1");
+  }
   for (const filter of state.attrFilters) {
     if (filter.key.trim() && filter.value.trim()) {
       params.append("attr", `${filter.key}=${filter.value}`);
@@ -149,6 +168,7 @@ export function SearchPage(props: SearchPageProps) {
   const [range, setRange] = useState(() => getDefaultRange());
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [order, setOrder] = useState<TraceOrder>(DEFAULT_ORDER);
+  const [hasError, setHasError] = useState(false);
   const [query, setQuery] = useState<TraceQuery | null>(null);
 
   const sanitizedFilters = useMemo(
@@ -157,7 +177,21 @@ export function SearchPage(props: SearchPageProps) {
   );
 
   const traceState = useTraces(query);
-  const searchSuffix = window.location.search;
+  const searchSuffix = useMemo(() => {
+    if (!query) {
+      return "";
+    }
+    const searchParams = buildSearchParams({
+      service: query.service,
+      startMs: toMs(query.start),
+      endMs: toMs(query.end),
+      limit: query.limit,
+      order: query.order,
+      hasError: query.hasError,
+      attrFilters: query.attrFilters,
+    });
+    return searchParams ? `?${searchParams}` : "";
+  }, [query]);
 
   const applyUrlState = (search: string) => {
     const parsed = parseSearchState(search);
@@ -165,6 +199,7 @@ export function SearchPage(props: SearchPageProps) {
     setRange({ startMs: parsed.startMs, endMs: parsed.endMs });
     setLimit(parsed.limit);
     setOrder(parsed.order);
+    setHasError(parsed.hasError);
     setFilters(parsed.attrFilters);
     setServiceError(undefined);
 
@@ -179,6 +214,7 @@ export function SearchPage(props: SearchPageProps) {
       end: toNs(parsed.endMs),
       limit: parsed.limit,
       order: parsed.order,
+      hasError: parsed.hasError,
       attrFilters: parsed.attrFilters,
     });
   };
@@ -217,6 +253,7 @@ export function SearchPage(props: SearchPageProps) {
       end: endNs,
       limit: nextLimit,
       order,
+      hasError,
       attrFilters: sanitizedFilters,
     });
 
@@ -226,6 +263,7 @@ export function SearchPage(props: SearchPageProps) {
       endMs: range.endMs,
       limit: nextLimit,
       order,
+      hasError,
       attrFilters: sanitizedFilters,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
@@ -246,6 +284,7 @@ export function SearchPage(props: SearchPageProps) {
       endMs: toMs(query.end),
       limit: nextLimit,
       order: query.order,
+      hasError: query.hasError,
       attrFilters: query.attrFilters,
     });
     const nextUrl = searchParams ? `${window.location.pathname}?${searchParams}` : window.location.pathname;
@@ -274,6 +313,24 @@ export function SearchPage(props: SearchPageProps) {
             ))}
           </select>
           <div class="field-hint">Sort traces by start time or duration.</div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="has-error-input">
+            Errors only
+          </label>
+          <label class="field-checkbox">
+            <input
+              id="has-error-input"
+              type="checkbox"
+              checked={hasError}
+              onChange={(event) => {
+                const next = (event.target as HTMLInputElement).checked;
+                setHasError(next);
+              }}
+            />
+            <span>Show traces with at least one error span.</span>
+          </label>
+          <div class="field-hint">Uses the current service, time range, and attribute filters.</div>
         </div>
         <TimeRangePicker startMs={range.startMs} endMs={range.endMs} onChange={setRange} />
         <AttrFilters filters={filters} onChange={setFilters} />

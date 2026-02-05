@@ -16,12 +16,21 @@ const (
 	TraceOrderDurationAsc  TraceOrder = "duration_asc"
 )
 
+type StatusCode int32
+
+const (
+	StatusUnset StatusCode = 0
+	StatusOk    StatusCode = 1
+	StatusError StatusCode = 2
+)
+
 type QueryParams struct {
 	Service     string
 	Start       int64
 	End         int64
 	Limit       int
 	AttrFilters []AttrFilter
+	StatusCode  *StatusCode
 }
 
 type TraceQueryParams struct {
@@ -31,6 +40,14 @@ type TraceQueryParams struct {
 	Limit       int
 	Order       TraceOrder
 	AttrFilters []AttrFilter
+	StatusCode  *StatusCode
+	HasError    bool
+}
+
+type TraceSpansQueryParams struct {
+	TraceID    string
+	Service    string
+	StatusCode *StatusCode
 }
 
 type TraceSummary struct {
@@ -94,5 +111,5 @@ type Link struct {
 type Store interface {
 	QuerySpans(ctx context.Context, params QueryParams) ([]Span, error)
 	QueryTraces(ctx context.Context, params TraceQueryParams) ([]TraceSummary, error)
-	QueryTraceSpans(ctx context.Context, traceID string, service string) ([]Span, error)
+	QueryTraceSpans(ctx context.Context, params TraceSpansQueryParams) ([]Span, error)
 }

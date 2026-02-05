@@ -322,12 +322,12 @@ func (s *Sink) QueryTraces(ctx context.Context, params spanstore.TraceQueryParam
 	return summaries, nil
 }
 
-func (s *Sink) QueryTraceSpans(ctx context.Context, traceID string, service string) ([]spanstore.Span, error) {
-	traceID = strings.TrimSpace(traceID)
+func (s *Sink) QueryTraceSpans(ctx context.Context, params spanstore.TraceSpansQueryParams) ([]spanstore.Span, error) {
+	traceID := strings.TrimSpace(params.TraceID)
 	if traceID == "" {
 		return nil, fmt.Errorf("trace_id is required")
 	}
-	query, args := buildTraceSpansQuery(traceID, service)
+	query, args := buildTraceSpansQuery(traceID, params.Service, params.StatusCode)
 	var spans []spanstore.Span
 	err := withRetry(ctx, defaultRetryTimeout, func(ctx context.Context) error {
 		return s.withConn(ctx, func(conn *sql.Conn) error {
@@ -427,6 +427,11 @@ WHERE service_name = ? AND start_time_unix_nano >= ? AND start_time_unix_nano <=
 		args = append(args, filter.Key, filter.Value)
 	}
 
+	if params.StatusCode != nil {
+		builder.WriteString(` AND status_code = ?`)
+		args = append(args, int32(*params.StatusCode))
+	}
+
 	builder.WriteString(` ORDER BY start_time_unix_nano DESC LIMIT ?`)
 	args = append(args, params.Limit)
 
@@ -444,6 +449,14 @@ WHERE service_name = ? AND start_time_unix_nano >= ? AND start_time_unix_nano <=
 	for _, filter := range params.AttrFilters {
 		builder.WriteString(` AND EXISTS (SELECT 1 FROM span_attributes sa WHERE sa.span_id = spans.id AND sa.key = ? AND sa.value = ?)`)
 		args = append(args, filter.Key, filter.Value)
+	}
+
+	if params.StatusCode != nil {
+		builder.WriteString(` AND status_code = ?`)
+		args = append(args, int32(*params.StatusCode))
+	}
+	if params.HasError {
+		builder.WriteString(` AND status_code = 2`)
 	}
 
 	builder.WriteString(`)
@@ -481,7 +494,7 @@ func traceSummaryOrderClause(order spanstore.TraceOrder) string {
 	}
 }
 
-func buildTraceSpansQuery(traceID string, service string) (string, []interface{}) {
+func buildTraceSpansQuery(traceID string, service string, status *spanstore.StatusCode) (string, []interface{}) {
 	args := []interface{}{traceID}
 	builder := strings.Builder{}
 	builder.WriteString(`SELECT id, trace_id, span_id, parent_span_id, name, kind, start_time_unix_nano, end_time_unix_nano, status_code, status_message, service_name, flags, resource_id, scope_id
@@ -490,6 +503,10 @@ WHERE trace_id = ?`)
 	if strings.TrimSpace(service) != "" {
 		builder.WriteString(` AND service_name = ?`)
 		args = append(args, service)
+	}
+	if status != nil {
+		builder.WriteString(` AND status_code = ?`)
+		args = append(args, int32(*status))
 	}
 	builder.WriteString(` ORDER BY start_time_unix_nano ASC`)
 	return builder.String(), args

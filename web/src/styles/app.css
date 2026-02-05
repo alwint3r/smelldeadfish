@@ -115,6 +115,20 @@
   background: var(--panel-muted);
 }
 
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.field-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .field-input--error {
   border-color: var(--error);
 }
@@ -359,6 +373,10 @@
   flex-direction: column;
   gap: 12px;
   min-height: 60vh;
+}
+
+.trace-detail-controls {
+  margin-bottom: 8px;
 }
 
 .span-tree {

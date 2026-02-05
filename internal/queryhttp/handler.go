@@ -98,12 +98,17 @@ func parseQueryParams(r *http.Request) (spanstore.QueryParams, error) {
 	if err != nil {
 		return spanstore.QueryParams{}, err
 	}
+	status, err := parseStatusFilter(values.Get("status"))
+	if err != nil {
+		return spanstore.QueryParams{}, err
+	}
 	return spanstore.QueryParams{
 		Service:     service,
 		Start:       start,
 		End:         end,
 		Limit:       limit,
 		AttrFilters: filters,
+		StatusCode:  status,
 	}, nil
 }
 
@@ -145,4 +150,24 @@ func parseAttrFilters(rawFilters []string) ([]spanstore.AttrFilter, error) {
 		filters = append(filters, spanstore.AttrFilter{Key: key, Value: value})
 	}
 	return filters, nil
+}
+
+func parseStatusFilter(raw string) (*spanstore.StatusCode, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return nil, nil
+	}
+	switch trimmed {
+	case "unset":
+		value := spanstore.StatusUnset
+		return &value, nil
+	case "ok":
+		value := spanstore.StatusOk
+		return &value, nil
+	case "error":
+		value := spanstore.StatusError
+		return &value, nil
+	default:
+		return nil, fmt.Errorf("status must be unset, ok, or error")
+	}
 }

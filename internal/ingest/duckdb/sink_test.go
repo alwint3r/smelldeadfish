@@ -4,6 +4,7 @@ package duckdb
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -278,5 +279,203 @@ func TestDuckDBSinkQuerySpansBatchLoadsAttributes(t *testing.T) {
 	}
 	if len(span.Links) != 1 || span.Links[0].TraceState != "demo=2" {
 		t.Fatalf("expected link to load, got %+v", span.Links)
+	}
+}
+
+func TestDuckDBSinkFiltersByStatus(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.duckdb")
+
+	sink, err := New(path)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Fatalf("close sink: %v", err)
+		}
+	}()
+
+	start := uint64(time.Now().Add(-15 * time.Millisecond).UnixNano())
+	end := uint64(time.Now().UnixNano())
+	traceErrorID := []byte{0x01, 0x02}
+	traceOkID := []byte{0x03, 0x04}
+	req := &coltracepb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "status-service"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Scope: &commonpb.InstrumentationScope{Name: "scope", Version: "v1"},
+						Spans: []*tracepb.Span{
+							{
+								TraceId:           traceErrorID,
+								SpanId:            []byte{0x0a, 0x0b},
+								ParentSpanId:      []byte{},
+								Name:              "root-error",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR, Message: "boom"},
+							},
+							{
+								TraceId:           traceErrorID,
+								SpanId:            []byte{0x0c, 0x0d},
+								ParentSpanId:      []byte{0x0a, 0x0b},
+								Name:              "child-ok",
+								Kind:              tracepb.Span_SPAN_KIND_CLIENT,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK},
+							},
+							{
+								TraceId:           traceOkID,
+								SpanId:            []byte{0x0e, 0x0f},
+								ParentSpanId:      []byte{},
+								Name:              "root-ok",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := sink.Consume(context.Background(), req); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	statusError := spanstore.StatusError
+	summaries, err := sink.QueryTraces(context.Background(), spanstore.TraceQueryParams{
+		Service:    "status-service",
+		Start:      int64(start) - int64(time.Millisecond),
+		End:        int64(end) + int64(time.Millisecond),
+		Limit:      10,
+		Order:      spanstore.TraceOrderStartDesc,
+		StatusCode: &statusError,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected one trace summary, got %d", len(summaries))
+	}
+	expectedTraceID := fmt.Sprintf("%x", traceErrorID)
+	if summaries[0].TraceID != expectedTraceID {
+		t.Fatalf("unexpected trace_id: %s", summaries[0].TraceID)
+	}
+
+	spans, err := sink.QueryTraceSpans(context.Background(), spanstore.TraceSpansQueryParams{
+		TraceID:    expectedTraceID,
+		Service:    "status-service",
+		StatusCode: &statusError,
+	})
+	if err != nil {
+		t.Fatalf("query trace spans: %v", err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("expected one span, got %d", len(spans))
+	}
+	if spans[0].Name != "root-error" {
+		t.Fatalf("unexpected span: %+v", spans[0])
+	}
+}
+
+func TestDuckDBSinkFiltersByHasError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spans.duckdb")
+
+	sink, err := New(path)
+	if err != nil {
+		t.Fatalf("new sink: %v", err)
+	}
+	defer func() {
+		if err := sink.Close(); err != nil {
+			t.Fatalf("close sink: %v", err)
+		}
+	}()
+
+	start := uint64(time.Now().Add(-15 * time.Millisecond).UnixNano())
+	end := uint64(time.Now().UnixNano())
+	traceErrorID := []byte{0x01, 0x02}
+	traceOkID := []byte{0x03, 0x04}
+	req := &coltracepb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*commonpb.KeyValue{
+						{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "status-service"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Scope: &commonpb.InstrumentationScope{Name: "scope", Version: "v1"},
+						Spans: []*tracepb.Span{
+							{
+								TraceId:           traceErrorID,
+								SpanId:            []byte{0x0a, 0x0b},
+								ParentSpanId:      []byte{},
+								Name:              "root-error",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR, Message: "boom"},
+							},
+							{
+								TraceId:           traceErrorID,
+								SpanId:            []byte{0x0c, 0x0d},
+								ParentSpanId:      []byte{0x0a, 0x0b},
+								Name:              "child-ok",
+								Kind:              tracepb.Span_SPAN_KIND_CLIENT,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK},
+							},
+							{
+								TraceId:           traceOkID,
+								SpanId:            []byte{0x0e, 0x0f},
+								ParentSpanId:      []byte{},
+								Name:              "root-ok",
+								Kind:              tracepb.Span_SPAN_KIND_SERVER,
+								StartTimeUnixNano: start,
+								EndTimeUnixNano:   end,
+								Status:            &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := sink.Consume(context.Background(), req); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+
+	summaries, err := sink.QueryTraces(context.Background(), spanstore.TraceQueryParams{
+		Service:  "status-service",
+		Start:    int64(start) - int64(time.Millisecond),
+		End:      int64(end) + int64(time.Millisecond),
+		Limit:    10,
+		Order:    spanstore.TraceOrderStartDesc,
+		HasError: true,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected one trace summary, got %d", len(summaries))
+	}
+	expectedTraceID := fmt.Sprintf("%x", traceErrorID)
+	if summaries[0].TraceID != expectedTraceID {
+		t.Fatalf("unexpected trace_id: %s", summaries[0].TraceID)
 	}
 }

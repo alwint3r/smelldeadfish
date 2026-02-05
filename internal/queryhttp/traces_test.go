@@ -25,7 +25,7 @@ func (t *traceStore) QueryTraces(_ context.Context, params spanstore.TraceQueryP
 	return []spanstore.TraceSummary{}, nil
 }
 
-func (t *traceStore) QueryTraceSpans(_ context.Context, _ string, _ string) ([]spanstore.Span, error) {
+func (t *traceStore) QueryTraceSpans(_ context.Context, _ spanstore.TraceSpansQueryParams) ([]spanstore.Span, error) {
 	return []spanstore.Span{}, nil
 }
 
@@ -65,6 +65,77 @@ func TestTracesHandlerRejectsInvalidOrder(t *testing.T) {
 	store := &traceStore{}
 	h := NewTracesHandler(store)
 	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&order=fastest", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d got %d", http.StatusBadRequest, resp.Code)
+	}
+}
+
+func TestTracesHandlerParsesStatus(t *testing.T) {
+	store := &traceStore{}
+	h := NewTracesHandler(store)
+	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&status=error", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected %d got %d", http.StatusOK, resp.Code)
+	}
+	if store.params.StatusCode == nil || *store.params.StatusCode != spanstore.StatusError {
+		t.Fatalf("unexpected status: %+v", store.params.StatusCode)
+	}
+}
+
+func TestTracesHandlerRejectsInvalidStatus(t *testing.T) {
+	store := &traceStore{}
+	h := NewTracesHandler(store)
+	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&status=bad", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d got %d", http.StatusBadRequest, resp.Code)
+	}
+}
+
+func TestTracesHandlerParsesHasError(t *testing.T) {
+	store := &traceStore{}
+	h := NewTracesHandler(store)
+	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&has_error=true", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected %d got %d", http.StatusOK, resp.Code)
+	}
+	if !store.params.HasError {
+		t.Fatalf("expected HasError true")
+	}
+}
+
+func TestTracesHandlerRejectsInvalidHasError(t *testing.T) {
+	store := &traceStore{}
+	h := NewTracesHandler(store)
+	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&has_error=maybe", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d got %d", http.StatusBadRequest, resp.Code)
+	}
+}
+
+func TestTracesHandlerRejectsHasErrorWithNonErrorStatus(t *testing.T) {
+	store := &traceStore{}
+	h := NewTracesHandler(store)
+	req := httptest.NewRequest(http.MethodGet, tracesPath+"?service=svc&start=1&end=2&limit=5&has_error=true&status=ok", nil)
 	resp := httptest.NewRecorder()
 
 	h.ServeHTTP(resp, req)

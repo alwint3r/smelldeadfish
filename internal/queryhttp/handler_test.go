@@ -30,7 +30,7 @@ func (f *fakeStore) QueryTraces(_ context.Context, _ spanstore.TraceQueryParams)
 	return []spanstore.TraceSummary{}, nil
 }
 
-func (f *fakeStore) QueryTraceSpans(_ context.Context, _ string, _ string) ([]spanstore.Span, error) {
+func (f *fakeStore) QueryTraceSpans(_ context.Context, _ spanstore.TraceSpansQueryParams) ([]spanstore.Span, error) {
 	return []spanstore.Span{}, nil
 }
 
@@ -85,6 +85,35 @@ func TestHandlerAcceptsMissingAttrFilters(t *testing.T) {
 
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected %d got %d", http.StatusOK, resp.Code)
+	}
+}
+
+func TestHandlerParsesStatus(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, spansPath+"?service=svc&start=1&end=2&status=ok", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected %d got %d", http.StatusOK, resp.Code)
+	}
+	if store.params.StatusCode == nil || *store.params.StatusCode != spanstore.StatusOk {
+		t.Fatalf("unexpected status: %+v", store.params.StatusCode)
+	}
+}
+
+func TestHandlerRejectsInvalidStatus(t *testing.T) {
+	store := &fakeStore{}
+	h := NewHandler(store)
+	req := httptest.NewRequest(http.MethodGet, spansPath+"?service=svc&start=1&end=2&status=broken", nil)
+	resp := httptest.NewRecorder()
+
+	h.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d got %d", http.StatusBadRequest, resp.Code)
 	}
 }
 
