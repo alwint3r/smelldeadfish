@@ -11,7 +11,6 @@ export function App() {
           <span class="brand-mark">smelldeadfish</span>
           <span class="brand-sub">Trace Explorer</span>
         </div>
-        <div class="brand-meta">Viewer</div>
       </header>
       <main class="main-content">
         <Router>

@@ -10,6 +10,9 @@ vars:
   WIN_OS: windows
   WIN_ARCH: amd64
   OTLP_SERVER_BIN_NAME: smelldeadfish-otlp-server
+  MINGW_BIN_DIR: /opt/homebrew/bin
+  MINGW_CC: '{{.MINGW_BIN_DIR}}/x86_64-w64-mingw32-gcc'
+  MINGW_CXX: '{{.MINGW_BIN_DIR}}/x86_64-w64-mingw32-g++'
 
 tasks:
   default:
@@ -38,7 +41,7 @@ tasks:
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
       - mkdir -p {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}
-      - CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
+      - '{{if eq .OS "windows"}}CC={{.MINGW_CC}} CXX={{.MINGW_CXX}} {{end}}CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -o {{.BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server'
 
   _build_embed_cgo:
     internal: true
@@ -46,7 +49,7 @@ tasks:
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
       - mkdir -p {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}
-      - CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server
+      - '{{if eq .OS "windows"}}CC={{.MINGW_CC}} CXX={{.MINGW_CXX}} {{end}}CGO_ENABLED=1 GOOS={{.OS}} GOARCH={{.ARCH}} go build -trimpath -tags uiembed -o {{.EMBED_BIN_DIR}}/{{.OS}}_{{.ARCH}}/{{.OTLP_SERVER_BIN_NAME}}{{.EXT}} ./cmd/otlp-server'
 
   build:server:windows:
     desc: Build otlp-server for Windows (amd64)
@@ -88,6 +91,10 @@ tasks:
     desc: Build CGO-enabled otlp-server for macOS (arm64)
     cmds: [{task: _build_cgo, vars: {OS: '{{.MAC_OS}}', ARCH: '{{.MAC_ARCH}}'}}]
 
+  build:cgo:windows:
+    desc: Build CGO-enabled otlp-server for Windows (amd64)
+    cmds: [{task: _build_cgo, vars: {OS: '{{.WIN_OS}}', ARCH: '{{.WIN_ARCH}}'}}]
+
   build:embed:
     desc: Build embedded-ui otlp-server for local dev (macOS)
     deps: [build:embed:darwin]
@@ -96,9 +103,17 @@ tasks:
     desc: Build CGO-enabled otlp-server (includes DuckDB) for local dev (macOS)
     deps: [build:cgo:darwin]
 
+  build:cgo:all:
+    desc: Build CGO-enabled otlp-server for all platforms
+    deps: [build:cgo:windows, build:cgo:darwin]
+
   build:embed:all:
     desc: Build embedded-ui otlp-server for all platforms
     deps: [build:embed:windows, build:embed:darwin]
+
+  build:cgo:embed:windows:
+    desc: Build embedded-ui CGO-enabled otlp-server for Windows (amd64)
+    cmds: [{task: _build_embed_cgo, vars: {OS: '{{.WIN_OS}}', ARCH: '{{.WIN_ARCH}}'}}]
 
   build:cgo:embed:darwin:
     desc: Build embedded-ui CGO-enabled otlp-server for macOS (arm64)
@@ -107,6 +122,10 @@ tasks:
   build:cgo:embed:
     desc: Build embedded-ui CGO-enabled otlp-server (includes DuckDB) for local dev (macOS)
     deps: [build:cgo:embed:darwin]
+
+  build:cgo:embed:all:
+    desc: Build embedded-ui CGO-enabled otlp-server for all platforms
+    deps: [build:cgo:embed:windows, build:cgo:embed:darwin]
 
   web:install:
     desc: Install web dependencies
@@ -149,6 +168,15 @@ tasks:
       - mkdir -p internal/uiembed/dist
       - cp -r web/dist/* internal/uiembed/dist/
       - task: build:embed:all
+
+  dist:embed:cgo:
+    desc: Build embedded-ui CGO-enabled server binaries
+    deps: [web:build:embed]
+    cmds:
+      - rm -rf internal/uiembed/dist
+      - mkdir -p internal/uiembed/dist
+      - cp -r web/dist/* internal/uiembed/dist/
+      - task: build:cgo:embed:all
 
   release:
     desc: Stage release artifacts (requires VERSION=vX.Y.Z)

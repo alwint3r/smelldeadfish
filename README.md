@@ -113,6 +113,30 @@ For embedded UI builds with DuckDB:
 task build:cgo:embed
 ```
 
+For Windows CGO cross-builds, install MinGW and ensure the compiler is available. The Taskfile defaults to `MINGW_BIN_DIR=/opt/homebrew/bin`, which resolves to `.../x86_64-w64-mingw32-gcc` and `.../x86_64-w64-mingw32-g++`. Build the Windows binary:
+
+```
+task build:cgo:windows
+```
+
+You can override the base directory:
+
+```
+task build:cgo:windows MINGW_BIN_DIR=/custom/mingw/bin
+```
+
+You can also override the compiler paths directly:
+
+```
+task build:cgo:windows MINGW_CC=/custom/cc MINGW_CXX=/custom/cxx
+```
+
+To build the embedded UI Windows binary with CGO:
+
+```
+task dist:embed:cgo
+```
+
 Outputs:
 
 - `dist/bin/darwin_arm64/otlp-server`
