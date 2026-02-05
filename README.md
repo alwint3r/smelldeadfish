@@ -27,10 +27,10 @@ The configurable server supports `-sink stdout`, `-sink sqlite`, or `-sink duckd
 go run ./cmd/otlp-server -sink sqlite -db ./smelldeadfish.sqlite
 ```
 
-DuckDB support requires CGO and the `duckdb` build tag:
+DuckDB support requires CGO:
 
 ```
-CGO_ENABLED=1 go run -tags duckdb ./cmd/otlp-server -sink duckdb -db ./smelldeadfish.duckdb
+CGO_ENABLED=1 go run ./cmd/otlp-server -sink duckdb -db ./smelldeadfish.duckdb
 ```
 
 When using the SQLite or DuckDB sink, ingestion is buffered by an in-memory queue to smooth bursts. Use `-queue-size` to set the maximum queued requests (default 10000); when full, OTLP requests will block until space is available. The SQLite store runs in WAL mode with `synchronous=NORMAL` and retries transient busy locks for a short period so read queries can continue during writes.
@@ -93,7 +93,7 @@ This repo includes a `Taskfile.yml` for cross-platform builds. From the reposito
 task build:all
 ```
 
-CGO-enabled DuckDB builds require CGO and the `duckdb` build tag. For local macOS builds:
+CGO-enabled DuckDB builds require CGO. For local macOS builds:
 
 ```
 task build:cgo

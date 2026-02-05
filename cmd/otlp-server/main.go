@@ -109,7 +109,7 @@ func setupDBSink(kind, dbPath string, queueSize int, logger *log.Logger) (ingest
 		return sink, newQueryHandlers(sqliteSink, logger), nil
 	case "duckdb":
 		if !ingestduckdb.Available() {
-			return nil, queryHandlers{}, fmt.Errorf("duckdb support unavailable: rebuild with -tags duckdb and CGO_ENABLED=1")
+			return nil, queryHandlers{}, fmt.Errorf("duckdb support unavailable: rebuild with CGO_ENABLED=1")
 		}
 		duckdbSink, err := ingestduckdb.New(dbPath)
 		if err != nil {

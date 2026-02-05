@@ -1,4 +1,4 @@
-//go:build !duckdb
+//go:build !cgo
 
 package duckdb
 
@@ -12,7 +12,7 @@ import (
 	"smelldeadfish/internal/spanstore"
 )
 
-var errUnavailable = errors.New("duckdb sink unavailable: rebuild with -tags duckdb and CGO_ENABLED=1")
+var errUnavailable = errors.New("duckdb sink unavailable: rebuild with CGO_ENABLED=1")
 
 type Sink struct{}
 
